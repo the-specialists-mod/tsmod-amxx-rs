@@ -88,13 +88,12 @@ impl FakeHost {
         if !self.watched.borrow().contains(&ham) {
             return self.run(ham, this, &args);
         }
-        let key = Box::into_raw(Box::new(0u8)) as usize;
-        let (action, args) = state::pre(self, key, ham as usize, this, self.class_of(this), args);
+        let (action, args) = state::pre(self, ham as usize, this, self.class_of(this), args);
         let orig = match action {
             Action::Supercede(_) => ret_ty.zero(),
             _ => self.run(ham, this, &args),
         };
-        match state::post(self, key, orig.clone(), Some(args)) {
+        match state::post(self, ham as usize, this, orig.clone(), Some(args)) {
             Action::Override(v) => v,
             _ => orig,
         }

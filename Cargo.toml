@@ -8,13 +8,13 @@ version = "0.1.0"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/the-specialists-mod/tsmod-amxx-rs"
 
-# The port's crates, pinned to the commit that defines version 2 of the plugin API
-# (`ts-plugin-api`, branch plugin-api-v2: entity hooks for hamsandwich).
+# The port's crates, pinned to the main commit with version 2 of the plugin API (`ts-plugin-api`,
+# entity hooks for hamsandwich) and its server implementation.
 [workspace.dependencies]
-goldsrc-sys = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", rev = "ee26122ab48ea279cba955c50d53964e84e0a69b" }
-ts-plugin-api = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", rev = "ee26122ab48ea279cba955c50d53964e84e0a69b" }
+goldsrc-sys = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", rev = "14999e6d50c4f830d30c1d5668dfa015e329e5ce" }
+ts-plugin-api = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", rev = "14999e6d50c4f830d30c1d5668dfa015e329e5ce" }
 # Tests only: the port's message encoders, so the parsers are checked against the real wire code.
-shared = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", rev = "ee26122ab48ea279cba955c50d53964e84e0a69b" }
+shared = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", rev = "14999e6d50c4f830d30c1d5668dfa015e329e5ce" }
 
 [profile.dev]
 panic = "abort" # unwinding across the C ABI is UB; be explicit

@@ -25,7 +25,7 @@ the weapon in hand.
 * The Rust TS server ([the-specialistsmod-rs](https://github.com/the-specialists-mod/the-specialistsmod-rs))
   on Linux or Windows, with the plugin API (`main` from `f585a02` on; releases after v0.2.0).
   Older builds work too, but the natives that change players do nothing (see below).
-  hamsandwich needs version 2 of the API (entity hooks, branch `plugin-api-v2`); without it,
+  hamsandwich needs version 2 of the API (entity hooks, `main` from `14999e6` on); without it,
   `IsHamValid` is false and `RegisterHam`/`ExecuteHam` fail as stock does for functions missing
   from its gamedata.
 * AMX Mod X 1.10 or 1.9 (1.8.2 should load: the module only requests functions that exist

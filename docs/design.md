@@ -162,9 +162,10 @@ Differences:
   version checks, the weapon table, rank file round trips including the upstream-format
   fixture, message parsing through the port's encoders, the damage/death logic, and every
   native against `FakeArgs` and `FakeGame`.
-* `cargo xtask e2e [linux] [win]`: see AGENTS.md. On 2026-10-12, against the port at `f585a02`
-  (with the API), both ReHLDS roots passed all 17 checks; against a build without the API, the
-  13 checks that apply passed and the setters returned 0 with one log line each.
+* `cargo xtask e2e [linux] [win]`: see AGENTS.md. On 2026-10-12, against the port at `14999e6`
+  (API version 2), both ReHLDS roots (Linux and Windows under Wine) passed all 19 tsx checks and
+  all 10 hamsandwich checks; against a build without the API, the 13 tsx checks that apply
+  passed, the setters returned 0 with one log line each, and hamsandwich skipped.
 
 ## 8. Ham Sandwich
 
@@ -192,8 +193,10 @@ as arrays, strings as strings, floats as cells holding the bits: the core's `Exe
 `FP_FLOAT` as a double). The first hook for a function turns it on with `ham_watch`. Handles are
 indices + 1; `OnPluginsUnloaded` drops every hook and turns the functions off.
 
-**Dispatch** (`state.rs`), stock's `hook_callbacks.cpp` protocol, on a stack of frames keyed by
-the `HamCall` address:
+**Dispatch** (`state.rs`), stock's `hook_callbacks.cpp` protocol, on a stack of frames. The
+server calls post exactly when it called pre, innermost first, so post belongs to the top frame
+(checked by `ham` and `this`; the `HamCall` itself moves between the two calls, so its address
+can't identify the call):
 
 * before: push a frame (`this` as parameter 1, then the arguments, `ret`/`origret` zero), run the
   pre forwards one at a time with the module state released. Each sees the parameters as earlier

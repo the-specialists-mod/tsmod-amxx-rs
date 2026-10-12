@@ -51,8 +51,9 @@ impl SetHook for PluginApi {
 }
 
 thread_local! {
-    /// Strings handed to the server for calls in progress, by `HamCall` address.
-    static CALL_STRINGS: RefCell<Vec<(usize, CString)>> = const { RefCell::new(Vec::new()) };
+    /// Strings handed to the server for each call in progress, innermost last (pre pushes, post
+    /// pops, as the frames).
+    static CALL_STRINGS: RefCell<Vec<Vec<CString>>> = const { RefCell::new(Vec::new()) };
     /// The last string return value, which the server reads after the hook returns.
     static RET_STRING: RefCell<Option<CString>> = const { RefCell::new(None) };
 }
@@ -112,19 +113,22 @@ unsafe extern "C" fn hook(call: *mut HamCall, post: c_int) -> c_int {
     // hook.
     let Some(call) = (unsafe { call.as_mut() }) else { return ham::action::CONTINUE };
     let Some(entry) = usize::try_from(call.ham).ok().and_then(|h| HOOKS.get(h)) else { return ham::action::CONTINUE };
-    let key = call as *mut HamCall as usize;
     let n = (call.argc.max(0) as usize).min(entry.args.len()).min(ham::MAX_ARGS);
     let args: Vec<Val> = entry.args[..n].iter().zip(&call.args[..n]).map(|(&t, a)| from_arg(t, a)).collect();
     let host = RealHost;
     if post == 0 {
-        let (action, new_args) = state::pre(&host, key, call.ham as usize, call.this, call.class, args);
+        let (action, new_args) = state::pre(&host, call.ham as usize, call.this, call.class, args);
         CALL_STRINGS.with(|k| {
-            let k = &mut *k.borrow_mut();
             let mut strings = Vec::new();
             for (i, (&t, v)) in entry.args.iter().zip(&new_args).enumerate() {
+                let orig_p = call.args[i].p;
                 call.args[i] = to_arg(t, v, &mut strings);
+                // An INT argument may carry a pointer too (Keyvalue's KeyValueData*): keep it.
+                if call.args[i].kind == ham::kind::INT {
+                    call.args[i].p = orig_p;
+                }
             }
-            k.extend(strings.into_iter().map(|s| (key, s)));
+            k.borrow_mut().push(strings);
         });
         match action {
             Action::Supercede(v) => {
@@ -135,8 +139,8 @@ unsafe extern "C" fn hook(call: *mut HamCall, post: c_int) -> c_int {
         }
     } else {
         let orig = from_arg(entry.ret, &call.orig_ret);
-        let action = state::post(&host, key, orig, Some(args));
-        CALL_STRINGS.with(|k| k.borrow_mut().retain(|(owner, _)| *owner != key));
+        let action = state::post(&host, call.ham as usize, call.this, orig, Some(args));
+        CALL_STRINGS.with(|k| k.borrow_mut().pop());
         match action {
             Action::Override(v) => {
                 set_ret(call, entry.ret, &v);

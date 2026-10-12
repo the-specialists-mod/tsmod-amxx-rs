@@ -80,7 +80,7 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 [[package]]
 name = "goldsrc"
 version = "3.0.0"
-source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?rev=ee26122ab48ea279cba955c50d53964e84e0a69b#ee26122ab48ea279cba955c50d53964e84e0a69b"
+source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?rev=14999e6d50c4f830d30c1d5668dfa015e329e5ce#14999e6d50c4f830d30c1d5668dfa015e329e5ce"
 dependencies = [
  "goldsrc-sys",
 ]
@@ -88,7 +88,7 @@ dependencies = [
 [[package]]
 name = "goldsrc-sys"
 version = "3.0.0"
-source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?rev=ee26122ab48ea279cba955c50d53964e84e0a69b#ee26122ab48ea279cba955c50d53964e84e0a69b"
+source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?rev=14999e6d50c4f830d30c1d5668dfa015e329e5ce#14999e6d50c4f830d30c1d5668dfa015e329e5ce"
 dependencies = [
  "bindgen",
 ]
@@ -251,7 +251,7 @@ dependencies = [
 [[package]]
 name = "shared"
 version = "3.0.0"
-source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?rev=ee26122ab48ea279cba955c50d53964e84e0a69b#ee26122ab48ea279cba955c50d53964e84e0a69b"
+source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?rev=14999e6d50c4f830d30c1d5668dfa015e329e5ce#14999e6d50c4f830d30c1d5668dfa015e329e5ce"
 dependencies = [
  "goldsrc",
  "goldsrc-sys",
@@ -310,7 +310,7 @@ dependencies = [
 [[package]]
 name = "ts-plugin-api"
 version = "3.0.0"
-source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?rev=ee26122ab48ea279cba955c50d53964e84e0a69b#ee26122ab48ea279cba955c50d53964e84e0a69b"
+source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?rev=14999e6d50c4f830d30c1d5668dfa015e329e5ce#14999e6d50c4f830d30c1d5668dfa015e329e5ce"
 
 [[package]]
 name = "tsfun"

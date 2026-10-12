@@ -11,7 +11,8 @@
 //! the plugins' value when the *last* forward that ran said `HAM_OVERRIDE` or more
 //! (`thisresult`), else the function's. Here the server calls [`pre`] and [`post`] around its own
 //! function (`ts-plugin-api` version 2); the state lives in a [`Frame`] per call, on a stack, so
-//! nested calls (a forward dealing damage, `ExecuteHamB`) work as in stock.
+//! nested calls (a forward dealing damage, `ExecuteHamB`) work as in stock. The server calls
+//! post exactly when it called pre, innermost first, so post belongs to the top frame.
 //!
 //! The state is a thread-local `RefCell`; forwards run with it released, since plugins call the
 //! data natives from them.
@@ -67,8 +68,9 @@ impl Param {
 /// A call in progress.
 #[derive(Clone, Debug)]
 pub struct Frame {
-    /// Identifies the call between [`pre`] and [`post`] (the server's `HamCall` address).
-    pub key: usize,
+    /// `this` as the server passed it, which with `ham` matches [`post`] to its [`pre`] (the
+    /// server's `HamCall` may move in between, so its address can't).
+    pub this0: i32,
     pub ham: usize,
     pub class: i32,
     /// `params[0]` is `this` (stock's `MAKE_VECTOR` puts it first, so `SetHamParam*(1, ...)` is
@@ -212,12 +214,12 @@ fn run_forwards(host: &dyn Host, post: bool) {
 
 /// Before the server runs `ham` on `this`: pushes the call and runs the pre forwards. The
 /// arguments the function should get are in the returned frame's parameters.
-pub fn pre(host: &dyn Host, key: usize, ham: usize, this: i32, class: i32, args: Vec<Val>) -> (Action, Vec<Val>) {
+pub fn pre(host: &dyn Host, ham: usize, this: i32, class: i32, args: Vec<Val>) -> (Action, Vec<Val>) {
     let Some(entry) = HOOKS.get(ham) else { return (Action::Continue, args) };
     let mut params = vec![Param::new(Ty::Cbase, Val::Ent(this))];
     params.extend(entry.args.iter().zip(args).map(|(&t, v)| Param::new(t, v)));
     let frame = Frame {
-        key,
+        this0: this,
         ham,
         class,
         params,
@@ -242,9 +244,9 @@ pub fn pre(host: &dyn Host, key: usize, ham: usize, this: i32, class: i32, args:
 /// After the function (or after a supercede, when `orig_ret` is the type's zero): runs the post
 /// forwards, pops the call and decides the return value by the last forward's result, as stock's
 /// `CHECK_RETURN`. `out_args` are the arguments as the function left them (pointer parameters).
-pub fn post(host: &dyn Host, key: usize, orig_ret: Val, out_args: Option<Vec<Val>>) -> Action {
+pub fn post(host: &dyn Host, ham: usize, this: i32, orig_ret: Val, out_args: Option<Vec<Val>>) -> Action {
     let found = with(|s| {
-        let i = s.frames.iter().rposition(|f| f.key == key)?;
+        let i = s.frames.iter().rposition(|f| f.ham == ham && f.this0 == this)?;
         // A frame left over from a call whose post never came (shouldn't happen) is dropped.
         s.frames.truncate(i + 1);
         let f = s.frames.last_mut()?;

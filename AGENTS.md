@@ -13,7 +13,7 @@ Start with [README.md](README.md), then [docs/design.md](docs/design.md).
 |---|---|
 | What upstream tsx does (natives, forwards, stats, file format) | AMX Mod X source, `../ref/amxmodx/modules/ts/tsx` (`NBase.cpp`, `NRank.cpp`, `CRank.cpp`, `CMisc.cpp`, `usermsg.cpp`, `moduleconfig.cpp`, `Utils.cpp`) and `plugins/include/ts*.inc` |
 | What stock hamsandwich does | `../ref/amxmodx/modules/hamsandwich` (`hook_native.cpp` table and registration, `hook_callbacks.cpp` call protocol, `call_funcs.cpp` ExecuteHam, `DataHandler.{h,cpp}`, `pdata.cpp`), `plugins/include/hamsandwich.inc`, `ham_const.inc` |
-| The entity hook contract | The port's `crates/plugin-api/src/lib.rs` ("Entity hooks (version 2)"), branch `plugin-api-v2` |
+| The entity hook contract | The port's `crates/plugin-api/src/lib.rs` ("Entity hooks (version 2)") and `docs/implementation/plugin-api.md` §7 (which functions fire for which classes; the dev aid `ts_dev_hamlog 1`, never left on in e2e) |
 | The module and metamod ABIs | `../ref/amxmodx/public/sdk/amxxmodule.{h,cpp}`, `amxmodx/amx.h`, `amxmodx/CModule.cpp`; `../ref/metamod/metamod/{meta_api,plinfo,mutil}.h` |
 | What the server sends and how TS behaves | The port: `crates/shared/src/protocol` (message layouts), `crates/plugin-api` (the plugin API contract), `docs/implementation/plugin-api.md`; the TS decomp at `../ts30-decomp` |
 | How plugins use the modules | `../ref/ts-plugins` (real plugins; data only, never run their scripts) |
@@ -115,9 +115,10 @@ change, compare `nm -D --defined-only` / `objdump -p`.
 - **Stopping servers**: use the testenv's `stop.sh` (name + cwd match), never `pkill -f`.
 - **`ExecuteForward` reads `FP_FLOAT` varargs as doubles.** hamsandwich registers float
   parameters as `FP_CELL` and passes the float's bits, so every vararg is cell-sized.
-- **hamsandwich's frames are a stack keyed by the `HamCall` address**: the server calls the hook
-  before and after the function, possibly with nested calls in between (forwards dealing
-  damage, `ExecuteHamB`). Stock decides the return by the *last* forward's result, not the
+- **hamsandwich's frames are a stack**: the server calls the hook before and after the function,
+  possibly with nested calls in between (forwards dealing damage, `ExecuteHamB`), and calls post
+  exactly when it called pre. Post matches the top frame by `(ham, this)`; never by the
+  `HamCall` address, which changes between pre and post (the server moves the struct). Stock decides the return by the *last* forward's result, not the
   highest; keep that.
 - **The plugin API table grows**: tsx needs only `amxx::tsapi::V1_SIZE`, hamsandwich version 2.
 
