@@ -1,0 +1,77 @@
+# Builds the modules for i686 Linux and Windows and publishes a GitHub release when a `v*` tag
+# is pushed: tsmod-amxx-rs-<tag>-<platform>.zip, each holding addons/amxmodx/modules/ to copy
+# over a server's ts/addons/. A manual run (workflow_dispatch) builds the archives as a workflow
+# artifact without publishing a release.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # 24.04 for its clang 18: bindgen with 22.04's clang 14 fails on the MinGW intrinsics headers.
+    runs-on: ubuntu-24.04
+    env:
+      FWGS_DIR: ${{ github.workspace }}/xash3d-fwgs
+    steps:
+      - uses: actions/checkout@v4
+
+      # goldsrc-sys (the port's, a git dependency) generates its bindings from the FWGS headers.
+      # Same commit as the port's release workflow.
+      - name: FWGS headers
+        run: |
+          git clone --filter=blob:none https://github.com/FWGS/xash3d-fwgs xash3d-fwgs
+          git -C xash3d-fwgs checkout 51353ff8d65e58300eeb2bd014867673f1f367c6
+          git -C xash3d-fwgs submodule update --init 3rdparty/library_suffix
+
+      - name: Toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib mingw-w64 libclang-dev zip
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy \
+            --target i686-unknown-linux-gnu,i686-pc-windows-gnu
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Unit tests
+        run: cargo xtask test
+
+      - name: Lint
+        run: cargo xtask lint
+
+      # dist strips the libraries, fails if a DLL imports a MinGW runtime DLL (the server loads
+      # them with only system DLLs around) or tsx lacks the undecorated GiveFnptrsToDll.
+      - name: Package
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          [[ "$GITHUB_REF_TYPE" == tag ]] || version="${GITHUB_SHA::7}"
+          cargo xtask dist
+          if objdump -p dist/windows-i686/addons/amxmodx/modules/*.dll | grep -iE 'DLL Name: (libgcc|libwinpthread|libstdc)'; then
+            echo "a module links a MinGW runtime DLL" >&2
+            exit 1
+          fi
+          mkdir -p out
+          for dir in dist/*/; do
+            platform=$(basename "$dir")
+            cp LICENSE LICENSE-EXCEPTION.txt README.md "$dir"
+            (cd "$dir" && zip -qr "$GITHUB_WORKSPACE/out/tsmod-amxx-rs-$version-$platform.zip" addons LICENSE LICENSE-EXCEPTION.txt README.md)
+          done
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsmod-amxx-rs
+          path: out/*
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" out/* --title "$GITHUB_REF_NAME" --generate-notes --verify-tag

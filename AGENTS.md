@@ -1,0 +1,114 @@
+# AGENTS.md
+
+Guidance for coding agents (and people) working in this repository: AMX Mod X's TS modules,
+**tsx** and **tsfun**, ported to Rust for the Rust port of The Specialists 3.0
+([the-specialistsmod-rs](https://github.com/the-specialists-mod/the-specialistsmod-rs), checked
+out at `../rust-hlmod-the-specialists`).
+
+Start with [README.md](README.md), then [docs/design.md](docs/design.md).
+
+## Sources of truth
+
+| Question | Where to look |
+|---|---|
+| What upstream tsx does (natives, forwards, stats, file format) | AMX Mod X source, `../ref/amxmodx/modules/ts/tsx` (`NBase.cpp`, `NRank.cpp`, `CRank.cpp`, `CMisc.cpp`, `usermsg.cpp`, `moduleconfig.cpp`, `Utils.cpp`) and `plugins/include/ts*.inc` |
+| The module and metamod ABIs | `../ref/amxmodx/public/sdk/amxxmodule.{h,cpp}`, `amxmodx/amx.h`, `amxmodx/CModule.cpp`; `../ref/metamod/metamod/{meta_api,plinfo,mutil}.h` |
+| What the server sends and how TS behaves | The port: `crates/shared/src/protocol` (message layouts), `crates/plugin-api` (the plugin API contract), `docs/implementation/plugin-api.md`; the TS decomp at `../ts30-decomp` |
+| How plugins use the modules | `../ref/ts-plugins` (real plugins; data only, never run their scripts) |
+
+Port behaviour from upstream's source, not from memory. When this port deliberately differs,
+add it to `docs/design.md` §6 and the README's native table.
+
+## Layout and the `unsafe` boundary
+
+```
+crates/amxx/    AMX Mod X module SDK + metamod glue: all the FFI (unsafe allowed)
+crates/tsx/     the TSX module; #![deny(unsafe_code)] except src/ffi/
+crates/tsfun/   the TSFun wrapper (module info only)
+xtask/          cargo xtask build | dist | lint | test | e2e
+e2e/            tsx_e2e.sma, the end-to-end test plugin
+```
+
+1. **`unsafe` lives in `crates/amxx` and `crates/tsx/src/ffi/` only.** Every `unsafe` block has a
+   `// SAFETY:` comment saying why it holds (`clippy::undocumented_unsafe_blocks` is on; `cargo
+   xtask lint` makes it an error). Never weaken `deny(unsafe_code)` in tsx.
+2. **New engine or AMX Mod X access goes into `amxx` as a safe wrapper**, then tsx calls it
+   through the `game::Game` trait, which `ffi::game::RealGame` implements (and
+   `testing::FakeGame` fakes). Keep hooks in `ffi/hooks.rs` thin: convert pointers to indices
+   and strings, call a `State` method, fire forwards.
+3. **Don't hold the state across a call that can reach a plugin** (forwards, `MDLL_Use`/`Touch`,
+   API setters, which may send messages). `state::with` returns `None` instead of panicking on
+   re-entry, which would silently drop data: release, call out, take it again.
+4. **Exports**: `amxx::export_module!` (`AMXX_*`) in every module, `amxx::export_metamod!`
+   (`Meta_*`, `GiveFnptrsToDll`) in tsx only. AMX Mod X treats any library exporting
+   `Meta_Attach` as a metamod plugin.
+
+## Build and test
+
+Requirements: Rust stable with `i686-unknown-linux-gnu` and `i686-pc-windows-gnu`, clang ≥ 18,
+32-bit glibc/libgcc, MinGW-w64, and `../xash3d-fwgs` (with `3rdparty/library_suffix`) or
+`FWGS_DIR`: `goldsrc-sys` (a git dependency on the port) generates its bindings from the FWGS
+headers. `.cargo/config.toml` sets `FWGS_DIR` to `../xash3d-fwgs` unless the environment has it.
+
+```sh
+cargo xtask test                 # unit tests, host and i686 (i686 runs the ABI layout tests)
+cargo xtask build [--release]    # both targets; must build without warnings
+cargo xtask lint                 # cargo fmt --check, clippy --all-targets -D warnings, both targets
+cargo xtask dist [--debug-info]  # dist/<platform>/addons/amxmodx/modules/ with AMXX's file names;
+                                 # checks the DLLs import no MinGW runtime and export GiveFnptrsToDll
+cargo xtask e2e [linux] [win]    # end-to-end, below (~1.5 min per root)
+```
+
+`e2e` needs the AMX Mod X test roots from `../ref/amxx-testenv` (its README): `setup.sh`
+builds `~/games/amxx_rehlds_linux` / `amxx_rehlds_win` (ReHLDS + Metamod-R + AMX Mod X 1.10)
+from the port's `dist/`, so rerun it after a new port build (`cargo xtask --release dist` there).
+xtask installs the release modules and `e2e/tsx_e2e.sma` (compiled with that env's `amxxpc`)
+into the root, starts a 4-bot server on `ts_dojo` with the env's `run.sh`, waits for the
+plugin's `DONE` line in `ts/addons/amxmodx/logs/tsx_e2e.log`, stops it with `stop.sh`, and fails
+on any `CHECK ... FAIL`, a missing `TSX ... running` in `amxx modules`, or a `[TSX]` line in the
+AMX Mod X error log. It refuses to start while a server runs in that root. Overrides:
+`AMXX_TESTENV`, `AMXX_SCRIPTING`, `AMXX_LINUX_ROOT`, `AMXX_WIN_ROOT`, `E2E_TIMEOUT`.
+
+Before calling a change done: `cargo fmt`, `cargo xtask test`, `cargo xtask lint`, and
+`cargo xtask e2e linux win` for anything that touches hooks, natives or exports. When exports
+change, compare `nm -D --defined-only` / `objdump -p`.
+
+## Conventions
+
+- **Keep upstream's interface.** Native names, argument order, return values and errors,
+  forwards, library/class names (`tsx`/`xstats`, `tsfun`), cvars, localinfo keys and the
+  `tsstats.dat` format are what compiled plugins and existing servers depend on.
+- **Cite upstream.** Doc comments name the upstream function a piece ports (``/// `CPlayer::saveKill` ``),
+  and file headers credit the AMX Mod X Development Team (GPL-3.0-or-later with the AMX Mod X
+  exceptions).
+- **Formatting** is rustfmt's (`rustfmt.toml`: 140 columns, `use_small_heuristics = "Max"`).
+- **Comments say why**, not what. Doc comments on public items.
+- **Docs move with the code**: README's native table, `docs/design.md` (behaviour, deviations,
+  test results) in the same change.
+- **Port additions are marked** in comments (e.g. the `TSPAward` cache, shot counting from
+  events).
+
+## Pitfalls
+
+- **The bindings' `enginefuncs_t` is FWGS's**, longer than metamod's: never copy whole engine
+  tables, write fields (`amxx::meta` does).
+- **The server sends bots no `WeaponInfo`/`WStatus`/HUD updates of their weapon**: their weapon
+  in hand comes from the API or `pev->weaponmodel`.
+- **The API's `player_info` is a per-frame snapshot**: a getter right after a setter sees the old
+  value. Tests that check a setter's effect wait a frame (`e2e/tsx_e2e.sma` uses 0.3 s).
+- **TS 3.0 never sends `ClipInfo`**, upstream's shot source; shots come from fire events.
+- **Bot AI switches weapons by itself**: the e2e weapon check re-issues `weapon_13` and looks
+  again.
+- **amxxpc** needs its own directory on `LD_LIBRARY_PATH`. `state` is a Pawn keyword.
+- **`stop.sh` kills the server**, so `ServerDeactivate` (which saves `tsstats.dat`) doesn't run
+  at the end of an e2e run: "Could not load stats file" on the next start is expected.
+- **Stopping servers**: use the testenv's `stop.sh` (name + cwd match), never `pkill -f`.
+
+## Git
+
+- Work on `main`. Commit in logical steps; commit or push only when asked.
+- Releases: push a `v*` tag; `.github/workflows/release.yml` builds both platforms, checks the
+  Windows imports and publishes `tsmod-amxx-rs-<tag>-<platform>.zip`. It pins the FWGS commit
+  the port's release workflow uses; bump both together.
+- The port crates (`goldsrc-sys`, `ts-plugin-api`, `shared`) are git dependencies pinned to one
+  rev in the root `Cargo.toml`.
