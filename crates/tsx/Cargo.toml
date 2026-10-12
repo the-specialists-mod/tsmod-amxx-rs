@@ -1,0 +1,21 @@
+[package]
+name = "tsx"
+description = "AMX Mod X's TSX module (TS stats and natives) for the Rust port of The Specialists 3.0"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# xtask renames the output to AMX Mod X's file names (tsx_amxx_i386.so, tsx_amxx.dll).
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+amxx = { path = "../amxx" }
+goldsrc-sys.workspace = true
+ts-plugin-api.workspace = true
+
+[dev-dependencies]
+shared.workspace = true
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"

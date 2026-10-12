@@ -26,15 +26,11 @@ impl ScoreScript {
     pub fn load(path: &str) -> Result<ScoreScript, String> {
         let c = core().ok_or("AMX Mod X isn't attached")?;
         let p = c_string(path);
-        // SAFETY: an all-zero AMX is how the SDK passes a fresh one (`calc.amx` is a member that
-        // starts zeroed).
-        let mut s = ScoreScript {
-            amx: Box::new(unsafe { core::mem::zeroed() }),
-            code: core::ptr::null_mut(),
-            func: 0,
-            addr: [0; 2],
-            phys: [core::ptr::null_mut(); 2],
-        };
+        // SAFETY: every field of `Amx` is an integer or a raw pointer, so all-zero is valid; it
+        // is how the SDK passes a fresh one (`calc.amx` starts zeroed).
+        let fresh: Amx = unsafe { core::mem::zeroed() };
+        let mut s =
+            ScoreScript { amx: Box::new(fresh), code: core::ptr::null_mut(), func: 0, addr: [0; 2], phys: [core::ptr::null_mut(); 2] };
         let mut err = [0 as c_char; 128];
         // SAFETY: the core's loader with a zeroed AMX, an out-pointer for the code and an error
         // buffer of the size each variant expects (64 for the old one).

@@ -33,8 +33,12 @@ pub struct ModuleDef {
 /// A no-op callback for [`ModuleDef`] fields.
 pub fn nothing() {}
 
+/// `AMXX_Query`, for [`export_module!`].
+///
+/// # Safety
+/// NULL or valid pointers, as the core passes them.
 #[doc(hidden)]
-pub fn query(def: &ModuleDef, iface: *mut c_int, info: *mut ModuleInfo) -> c_int {
+pub unsafe fn query(def: &ModuleDef, iface: *mut c_int, info: *mut ModuleInfo) -> c_int {
     if iface.is_null() || info.is_null() {
         return AMXX_PARAM;
     }
@@ -57,8 +61,12 @@ pub fn query(def: &ModuleDef, iface: *mut c_int, info: *mut ModuleInfo) -> c_int
     AMXX_OK
 }
 
+/// `AMXX_CheckGame`, for [`export_module!`].
+///
+/// # Safety
+/// `game` is NULL or a C string.
 #[doc(hidden)]
-pub fn check_game(def: &ModuleDef, game: *const c_char) -> c_int {
+pub unsafe fn check_game(def: &ModuleDef, game: *const c_char) -> c_int {
     // SAFETY: NULL or the core's mod name.
     let game = unsafe { crate::core::cstr_lossy(game) };
     match def.check_game {
@@ -67,8 +75,12 @@ pub fn check_game(def: &ModuleDef, game: *const c_char) -> c_int {
     }
 }
 
+/// `AMXX_Attach`, for [`export_module!`].
+///
+/// # Safety
+/// `req` is the core's function lookup.
 #[doc(hidden)]
-pub fn attach(def: &ModuleDef, req: Option<ReqFnptr>) -> c_int {
+pub unsafe fn attach(def: &ModuleDef, req: Option<ReqFnptr>) -> c_int {
     let Some(req) = req else { return AMXX_PARAM };
     // SAFETY: `req` is the lookup the core passed to AMXX_Attach.
     if unsafe { crate::core::request(req, def.logtag) }.is_err() {
@@ -83,18 +95,21 @@ pub fn attach(def: &ModuleDef, req: Option<ReqFnptr>) -> c_int {
 macro_rules! export_module {
     ($def:path) => {
         #[unsafe(no_mangle)]
-        pub extern "C" fn AMXX_Query(iface: *mut ::core::ffi::c_int, info: *mut $crate::ffi::ModuleInfo) -> ::core::ffi::c_int {
-            $crate::module::query(&$def, iface, info)
+        pub unsafe extern "C" fn AMXX_Query(iface: *mut ::core::ffi::c_int, info: *mut $crate::ffi::ModuleInfo) -> ::core::ffi::c_int {
+            // SAFETY: the core's arguments, passed through.
+            unsafe { $crate::module::query(&$def, iface, info) }
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn AMXX_CheckGame(game: *const ::core::ffi::c_char) -> ::core::ffi::c_int {
-            $crate::module::check_game(&$def, game)
+        pub unsafe extern "C" fn AMXX_CheckGame(game: *const ::core::ffi::c_char) -> ::core::ffi::c_int {
+            // SAFETY: the core's argument, passed through.
+            unsafe { $crate::module::check_game(&$def, game) }
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn AMXX_Attach(req: Option<$crate::ffi::ReqFnptr>) -> ::core::ffi::c_int {
-            $crate::module::attach(&$def, req)
+        pub unsafe extern "C" fn AMXX_Attach(req: Option<$crate::ffi::ReqFnptr>) -> ::core::ffi::c_int {
+            // SAFETY: the core's argument, passed through.
+            unsafe { $crate::module::attach(&$def, req) }
         }
 
         #[unsafe(no_mangle)]
@@ -153,16 +168,22 @@ mod tests {
             libclass: core::ptr::null(),
         };
         let mut v = 3;
-        assert_eq!(query(&DEF, &mut v, &mut info), AMXX_IFVERS);
-        assert_eq!(v, AMXX_INTERFACE_VERSION);
-        assert_eq!(query(&DEF, &mut v, &mut info), AMXX_OK);
-        assert_eq!(info.reload, 1);
-        assert_eq!(query(&DEF, core::ptr::null_mut(), &mut info), AMXX_PARAM);
+        // SAFETY: valid pointers (or NULL, which `query` checks).
+        unsafe {
+            assert_eq!(query(&DEF, &mut v, &mut info), AMXX_IFVERS);
+            assert_eq!(v, AMXX_INTERFACE_VERSION);
+            assert_eq!(query(&DEF, &mut v, &mut info), AMXX_OK);
+            assert_eq!(info.reload, 1);
+            assert_eq!(query(&DEF, core::ptr::null_mut(), &mut info), AMXX_PARAM);
+        }
     }
 
     #[test]
     fn check_game_is_case_insensitive() {
-        assert_eq!(check_game(&DEF, c"TS".as_ptr()), AMXX_GAME_OK);
-        assert_eq!(check_game(&DEF, c"cstrike".as_ptr()), AMXX_GAME_BAD);
+        // SAFETY: C string literals.
+        unsafe {
+            assert_eq!(check_game(&DEF, c"TS".as_ptr()), AMXX_GAME_OK);
+            assert_eq!(check_game(&DEF, c"cstrike".as_ptr()), AMXX_GAME_BAD);
+        }
     }
 }

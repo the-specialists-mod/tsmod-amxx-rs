@@ -1,0 +1,302 @@
+// tsmod-amxx-rs, GPL-3.0-or-later with the AMX Mod X exceptions. Ports the module setup of
+// modules/ts/tsx/moduleconfig.cpp (`OnMetaAttach`, `OnAmxxAttach`, `OnPluginsLoaded`,
+// `OnAmxxDetach`, `AmxxCheckGame`) and its moduleconfig.h, Copyright (C) The AMX Mod X
+// Development Team, Copyright (C) 2004 Lukasz Wlasinski.
+
+//! The FFI layer: exports, hooks, the native table and the real [`Game`](crate::game::Game).
+//! The only module of this crate that may use `unsafe`; the rest is `deny(unsafe_code)`.
+
+mod game;
+mod hooks;
+
+use crate::natives::{base, stats};
+use crate::state::with;
+use amxx::Cell;
+use amxx::engine::engine;
+use amxx::meta::MetaDef;
+use amxx::module::{ModuleDef, nothing};
+use amxx::native::Args;
+use core::sync::atomic::Ordering;
+use game::{FWD_DAMAGE, FWD_DEATH, RealGame};
+
+const VERSION: &core::ffi::CStr = match core::ffi::CStr::from_bytes_with_nul(concat!(env!("CARGO_PKG_VERSION"), "\0").as_bytes()) {
+    Ok(v) => v,
+    Err(_) => c"0",
+};
+
+static MODULE: ModuleDef = ModuleDef {
+    name: c"TSX",
+    author: c"AMX Mod X Dev Team; Rust port: tsmod-amxx-rs",
+    version: VERSION,
+    logtag: c"TSX",
+    library: c"tsx",
+    libclass: c"xstats",
+    reload: false,
+    check_game: Some(|g| g.eq_ignore_ascii_case("ts")),
+    attach: amxx_attach,
+    detach: amxx_detach,
+    plugins_loaded,
+    plugins_unloading: nothing,
+    plugins_unloaded: nothing,
+};
+
+static META: MetaDef = MetaDef {
+    name: c"TSX",
+    version: VERSION,
+    date: c"",
+    author: c"AMX Mod X Dev Team; Rust port: tsmod-amxx-rs",
+    url: c"https://github.com/the-specialists-mod/tsmod-amxx-rs",
+    logtag: c"TSX",
+    attach: meta_attach,
+    dll: hooks::dll,
+    dll_post: hooks::dll_post,
+    engine: hooks::engine_pre,
+    engine_post: hooks::engine_post,
+};
+
+amxx::export_module!(MODULE);
+amxx::export_metamod!(META);
+
+/// `OnMetaAttach`: the stats cvars.
+fn meta_attach() {
+    let Some(e) = engine() else { return };
+    e.register_cvar(c"tsstats_maxsize", c"3500", 0);
+    e.register_cvar(c"tsstats_reset", c"0", 0);
+    e.register_cvar(c"tsstats_rank", c"0", 0);
+    e.register_cvar(c"tsstats_rankbots", c"1", 0);
+    e.register_cvar(c"tsstats_pause", c"0", 0);
+}
+
+/// `get_localinfo(name, def)`: the localinfo value, set to `def` first when empty.
+fn localinfo(name: &str, def: &str) -> String {
+    let Some(e) = engine() else { return def.to_owned() };
+    let v = e.localinfo(name);
+    if v.is_empty() {
+        e.set_localinfo(name, def);
+        return def.to_owned();
+    }
+    v
+}
+
+/// `OnAmxxAttach`: natives, the score plugin, and the rank file.
+fn amxx_attach() {
+    amxx::core::add_natives(&NATIVES);
+    let calc = localinfo("tsstats_score", "addons/amxmodx/data/tsstats.amxx");
+    if !calc.is_empty() {
+        let path = amxx::core::build_pathname(&calc);
+        match amxx::script::ScoreScript::load(&path) {
+            Ok(mut script) => {
+                let score: crate::rank::ScoreFn = Box::new(move |s: &crate::stats::Stats| {
+                    let body = s.body_hits;
+                    match script.score(&s.cells(), &body) {
+                        Ok(v) => v,
+                        Err(err) => {
+                            amxx::core::log(&format!("Run time error {err} on line (plugin \"{path}\")"));
+                            0
+                        }
+                    }
+                });
+                with(|st| st.rank.set_calc(Some(score)));
+            }
+            Err(e) => amxx::core::print_srv_console(&format!("[TSX] Couldn't load plugin (file \"{path}\"): {e}")),
+        }
+    }
+    if with(|s| s.rank.is_empty()).unwrap_or(false) {
+        let path = amxx::core::build_pathname(&localinfo("tsstats", "addons/amxmodx/data/tsstats.dat"));
+        match std::fs::File::open(&path) {
+            Ok(f) => {
+                let mut r = std::io::BufReader::new(f);
+                with(|s| s.rank.load(&mut r));
+            }
+            Err(_) => amxx::core::log(&format!("Could not load stats file: {path}")),
+        }
+    }
+}
+
+/// `OnAmxxDetach`.
+fn amxx_detach() {
+    with(|s| {
+        s.rank.clear();
+        s.rank.set_calc(None);
+    });
+}
+
+/// `OnPluginsLoaded`: the two forwards; then the plugin API.
+fn plugins_loaded() {
+    if let Some(f) = amxx::core::register_forward(c"client_damage", 6) {
+        FWD_DAMAGE.store(f.0, Ordering::Relaxed);
+    }
+    if let Some(f) = amxx::core::register_forward(c"client_death", 5) {
+        FWD_DEATH.store(f.0, Ordering::Relaxed);
+    }
+    check_api();
+}
+
+/// Looks the server's plugin API up; logs once when it is missing (the module still works,
+/// with the setters failing softly).
+fn check_api() {
+    use std::sync::atomic::AtomicBool;
+    static WARNED: AtomicBool = AtomicBool::new(false);
+    match game::find_api() {
+        Ok(()) => {}
+        Err(why) => {
+            if !WARNED.swap(true, Ordering::Relaxed) {
+                amxx::core::log(&format!(
+                    "WARNING: no TS plugin API ({why}). Needs a Rust TS server with ts-plugin-api; until then the natives that change \
+                     players (ts_setusercash, ts_set_message, power-ups, speed, ...) do nothing."
+                ));
+            }
+        }
+    }
+}
+
+/// Saves the rank (`ServerDeactivate`).
+fn save_rank() {
+    let path = amxx::core::build_pathname(&localinfo("tsstats", "addons/amxmodx/data/tsstats.dat"));
+    let mut buf = Vec::new();
+    if with(|s| s.rank.save(&mut buf)).is_some_and(|r| r.is_ok())
+        && let Err(e) = std::fs::write(&path, &buf)
+    {
+        amxx::core::log(&format!("Could not save stats file {path}: {e}"));
+    }
+}
+
+/// Binds the natives' logic to the real game.
+macro_rules! bind {
+    ($($name:ident => $f:path),* $(,)?) => {
+        $(fn $name(a: &mut dyn Args) -> Cell { $f(&RealGame::new(), a) })*
+    };
+}
+
+bind! {
+    n_get_weapon_name => base::get_weapon_name,
+    n_get_weapon_logname => base::get_weapon_logname,
+    n_is_melee => base::is_melee,
+    n_get_maxweapons => base::get_maxweapons,
+    n_get_stats_size => base::get_stats_size,
+    n_is_custom => base::is_custom,
+    n_wpnlog_to_name => base::wpnlog_to_name,
+    n_wpnlog_to_id => base::wpnlog_to_id,
+    n_ts_get_user_weapon => base::ts_get_user_weapon,
+    n_get_user_cash => base::get_user_cash,
+    n_set_user_cash => base::set_user_cash,
+    n_get_user_space => base::get_user_space,
+    n_get_user_pwup => base::get_user_pwup,
+    n_get_user_items => base::get_user_items,
+    n_get_killing_streak => base::get_killing_streak,
+    n_get_last_frag => base::get_last_frag,
+    n_get_kill_flags => base::get_kill_flags,
+    n_get_user_slots => base::get_user_slots,
+    n_set_user_slots => base::set_user_slots,
+    n_get_user_state => base::get_user_state,
+    n_give_weapon => base::give_weapon,
+    n_create_pwup => base::create_pwup,
+    n_give_pwup => base::give_pwup,
+    n_has_superjump => base::has_superjump,
+    n_has_fupowerup => base::has_fupowerup,
+    n_set_user_message => base::set_user_message,
+    n_get_user_message => base::get_user_message,
+    n_ts_setup => base::ts_setup,
+    n_register_forward => base::register_forward,
+    n_set_bullettrail => base::set_bullettrail,
+    n_set_fake_slowmo => base::set_fake_slowmo,
+    n_set_fake_slowpause => base::set_fake_slowpause,
+    n_is_in_slowmo => base::is_in_slowmo,
+    n_set_speed => base::set_speed,
+    n_set_physics_speed => base::set_physics_speed,
+    n_is_running_powerup => base::is_running_powerup,
+    n_force_powerup_run => base::force_powerup_run,
+    n_get_user_weapon => base::get_user_weapon,
+    n_get_stats => stats::get_stats,
+    n_get_statsnum => stats::get_statsnum,
+    n_get_user_astats => stats::get_user_astats,
+    n_get_user_rstats => stats::get_user_rstats,
+    n_get_user_stats => stats::get_user_stats,
+    n_get_user_vstats => stats::get_user_vstats,
+    n_get_user_wrstats => stats::get_user_wrstats,
+    n_get_user_wstats => stats::get_user_wstats,
+    n_reset_user_wstats => stats::reset_user_wstats,
+    n_register_cwpn => stats::register_cwpn,
+    n_cwpn_dmg => stats::cwpn_dmg,
+    n_cwpn_shot => stats::cwpn_shot,
+}
+
+// `stats_Natives` then `base_Natives`, with upstream's names (NRank.cpp, NBase.cpp).
+amxx::natives! {
+    pub(crate) static NATIVES = [
+        c"get_stats" => n_get_stats,
+        c"get_statsnum" => n_get_statsnum,
+        c"get_user_astats" => n_get_user_astats,
+        c"get_user_rstats" => n_get_user_rstats,
+        c"get_user_lstats" => n_get_user_rstats,
+        c"get_user_stats" => n_get_user_stats,
+        c"get_user_vstats" => n_get_user_vstats,
+        c"get_user_wrstats" => n_get_user_wrstats,
+        c"get_user_wstats" => n_get_user_wstats,
+        c"reset_user_wstats" => n_reset_user_wstats,
+        c"custom_weapon_add" => n_register_cwpn,
+        c"custom_weapon_dmg" => n_cwpn_dmg,
+        c"custom_weapon_shot" => n_cwpn_shot,
+        c"xmod_get_wpnname" => n_get_weapon_name,
+        c"xmod_get_wpnlogname" => n_get_weapon_logname,
+        c"xmod_is_melee_wpn" => n_is_melee,
+        c"xmod_get_maxweapons" => n_get_maxweapons,
+        c"xmod_get_stats_size" => n_get_stats_size,
+        c"xmod_is_custom_wpn" => n_is_custom,
+        c"ts_wpnlogtoname" => n_wpnlog_to_name,
+        c"ts_wpnlogtoid" => n_wpnlog_to_id,
+        c"ts_getuserwpn" => n_ts_get_user_weapon,
+        c"ts_getusercash" => n_get_user_cash,
+        c"ts_setusercash" => n_set_user_cash,
+        c"ts_getuserspace" => n_get_user_space,
+        c"ts_getuserpwup" => n_get_user_pwup,
+        c"ts_getuseritems" => n_get_user_items,
+        c"ts_getkillingstreak" => n_get_killing_streak,
+        c"ts_getuserlastfrag" => n_get_last_frag,
+        c"ts_getuserkillflags" => n_get_kill_flags,
+        c"ts_getuserslots" => n_get_user_slots,
+        c"ts_setuserslots" => n_set_user_slots,
+        c"ts_getuserstate" => n_get_user_state,
+        c"ts_giveweapon" => n_give_weapon,
+        c"ts_createpwup" => n_create_pwup,
+        c"ts_givepwup" => n_give_pwup,
+        c"ts_has_superjump" => n_has_superjump,
+        c"ts_has_fupowerup" => n_has_fupowerup,
+        c"ts_set_message" => n_set_user_message,
+        c"ts_get_message" => n_get_user_message,
+        c"ts_setpddata" => n_ts_setup,
+        c"register_statsfwd" => n_register_forward,
+        c"ts_set_bullettrail" => n_set_bullettrail,
+        c"ts_set_fakeslowmo" => n_set_fake_slowmo,
+        c"ts_set_fakeslowpause" => n_set_fake_slowpause,
+        c"ts_is_in_slowmo" => n_is_in_slowmo,
+        c"ts_set_speed" => n_set_speed,
+        c"ts_set_physics_speed" => n_set_physics_speed,
+        c"ts_is_running_powerup" => n_is_running_powerup,
+        c"ts_force_run_powerup" => n_force_powerup_run,
+        c"get_weaponname" => n_get_weapon_name,
+        c"get_user_weapon" => n_get_user_weapon,
+    ];
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NATIVES;
+
+    #[test]
+    fn native_table_has_every_upstream_name_once() {
+        let names: Vec<String> = NATIVES
+            .iter()
+            .take_while(|n| !n.name.is_null())
+            // SAFETY: the table's names are `'static` C string literals.
+            .map(|n| unsafe { core::ffi::CStr::from_ptr(n.name) }.to_string_lossy().into())
+            .collect();
+        // 13 in stats_Natives and 39 in base_Natives (NRank.cpp, NBase.cpp).
+        assert_eq!(names.len(), 52);
+        let mut sorted = names.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), names.len());
+        assert!(NATIVES.last().unwrap().name.is_null());
+    }
+}

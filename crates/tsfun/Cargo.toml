@@ -1,0 +1,13 @@
+[package]
+name = "tsfun"
+description = "AMX Mod X's TSFun module for the Rust port of The Specialists 3.0: the library name only"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# xtask renames the output to AMX Mod X's file names (tsfun_amxx_i386.so, tsfun_amxx.dll).
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+amxx = { path = "../amxx" }

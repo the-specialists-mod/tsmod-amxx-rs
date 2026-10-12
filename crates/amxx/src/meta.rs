@@ -62,8 +62,12 @@ pub fn compatible(theirs: &str, ours: &str) -> bool {
     mm == pm && mn >= pn
 }
 
+/// `Meta_Query`, for [`export_metamod!`].
+///
+/// # Safety
+/// The arguments are metamod's: NULL or valid pointers, `ifvers` a C string.
 #[doc(hidden)]
-pub fn query(def: &'static MetaDef, ifvers: *const c_char, info: *mut *const PluginInfo, mutil: *mut MutilFuncs) -> c_int {
+pub unsafe fn query(def: &'static MetaDef, ifvers: *const c_char, info: *mut *const PluginInfo, mutil: *mut MutilFuncs) -> c_int {
     let _ = DEF.set(def);
     let pi = INFO.get_or_init(|| PluginInfo {
         ifvers: META_INTERFACE_VERSION.as_ptr(),
@@ -91,8 +95,12 @@ pub fn query(def: &'static MetaDef, ifvers: *const c_char, info: *mut *const Plu
     1
 }
 
+/// `Meta_Attach`, for [`export_metamod!`].
+///
+/// # Safety
+/// The arguments are metamod's: NULL or valid pointers that outlive the plugin.
 #[doc(hidden)]
-pub fn attach(table: *mut MetaFunctions, globals: *mut MetaGlobals, gamedll: *mut GamedllFuncs) -> c_int {
+pub unsafe fn attach(table: *mut MetaFunctions, globals: *mut MetaGlobals, gamedll: *mut GamedllFuncs) -> c_int {
     if table.is_null() || globals.is_null() {
         return 0;
     }
@@ -117,8 +125,12 @@ pub fn attach(table: *mut MetaFunctions, globals: *mut MetaGlobals, gamedll: *mu
     1
 }
 
+/// `GiveFnptrsToDll`, for [`export_metamod!`].
+///
+/// # Safety
+/// The engine table and globals metamod passes, valid for the life of the library.
 #[doc(hidden)]
-pub fn give_fnptrs(funcs: *const enginefuncs_t, globals: *mut globalvars_t) {
+pub unsafe fn give_fnptrs(funcs: *const enginefuncs_t, globals: *mut globalvars_t) {
     if !funcs.is_null() && !globals.is_null() {
         // SAFETY: metamod (or the engine) passes its full engine table and the globals.
         unsafe { engine::set(funcs, globals) };
@@ -311,22 +323,24 @@ pub mod gamedll {
 macro_rules! export_metamod {
     ($def:path) => {
         #[unsafe(no_mangle)]
-        pub extern "C" fn Meta_Query(
+        pub unsafe extern "C" fn Meta_Query(
             ifvers: *const ::core::ffi::c_char,
             info: *mut *const $crate::ffi::PluginInfo,
             mutil: *mut $crate::ffi::MutilFuncs,
         ) -> ::core::ffi::c_int {
-            $crate::meta::query(&$def, ifvers, info, mutil)
+            // SAFETY: metamod's arguments, passed through.
+            unsafe { $crate::meta::query(&$def, ifvers, info, mutil) }
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn Meta_Attach(
+        pub unsafe extern "C" fn Meta_Attach(
             _now: ::core::ffi::c_int,
             table: *mut $crate::ffi::MetaFunctions,
             globals: *mut $crate::ffi::MetaGlobals,
             gamedll: *mut $crate::ffi::GamedllFuncs,
         ) -> ::core::ffi::c_int {
-            $crate::meta::attach(table, globals, gamedll)
+            // SAFETY: metamod's arguments, passed through.
+            unsafe { $crate::meta::attach(table, globals, gamedll) }
         }
 
         #[unsafe(no_mangle)]
@@ -336,8 +350,9 @@ macro_rules! export_metamod {
 
         /// stdcall on Windows (`WINAPI`); the build script maps the undecorated export name.
         #[unsafe(no_mangle)]
-        pub extern "system" fn GiveFnptrsToDll(funcs: *const $crate::sys::enginefuncs_t, globals: *mut $crate::sys::globalvars_t) {
-            $crate::meta::give_fnptrs(funcs, globals)
+        pub unsafe extern "system" fn GiveFnptrsToDll(funcs: *const $crate::sys::enginefuncs_t, globals: *mut $crate::sys::globalvars_t) {
+            // SAFETY: the engine's (via metamod) arguments, passed through.
+            unsafe { $crate::meta::give_fnptrs(funcs, globals) }
         }
     };
 }

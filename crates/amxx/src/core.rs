@@ -49,7 +49,7 @@ pub(crate) fn core() -> Option<&'static CoreFns> {
 /// `req` must be the function the core passed to `AMXX_Attach`.
 pub(crate) unsafe fn request(req: ReqFnptr, logtag: &'static CStr) -> Result<(), &'static CStr> {
     macro_rules! get {
-        ($name:literal) => {{
+        ($name:literal, $t:ty) => {{
             // SAFETY: `req` is the core's lookup (caller contract); it takes a C string.
             let p = unsafe { req($name.as_ptr()) };
             if p.is_null() {
@@ -57,32 +57,32 @@ pub(crate) unsafe fn request(req: ReqFnptr, logtag: &'static CStr) -> Result<(),
             }
             // SAFETY: the core returns the function the name stands for, whose signature the
             // SDK declares and the field type repeats.
-            unsafe { core::mem::transmute::<*mut core::ffi::c_void, _>(p) }
+            unsafe { core::mem::transmute::<*mut core::ffi::c_void, $t>(p) }
         }};
     }
     // SAFETY: as in `get!`; NULL maps to `None`.
     let load_ex = unsafe { req(c"LoadAmxScriptEx".as_ptr()) };
     let fns = CoreFns {
-        add_natives: get!(c"AddNatives"),
-        build_pathname: get!(c"BuildPathname"),
-        get_amx_addr: get!(c"GetAmxAddr"),
-        print_srv_console: get!(c"PrintSrvConsole"),
-        set_amx_string: get!(c"SetAmxString"),
-        get_amx_string: get!(c"GetAmxString"),
-        log: get!(c"Log"),
-        log_error: get!(c"LogError"),
-        register_forward: get!(c"RegisterForward"),
-        execute_forward: get!(c"ExecuteForward"),
-        is_player_ingame: get!(c"IsPlayerInGame"),
-        amx_exec: get!(c"amx_Exec"),
-        amx_allot: get!(c"amx_Allot"),
-        amx_find_public: get!(c"amx_FindPublic"),
-        amx_push: get!(c"amx_Push"),
-        load_amx_script: get!(c"LoadAmxScript"),
+        add_natives: get!(c"AddNatives", PfnAddNatives),
+        build_pathname: get!(c"BuildPathname", PfnBuildPathname),
+        get_amx_addr: get!(c"GetAmxAddr", PfnGetAmxAddr),
+        print_srv_console: get!(c"PrintSrvConsole", PfnPrintSrvConsole),
+        set_amx_string: get!(c"SetAmxString", PfnSetAmxString),
+        get_amx_string: get!(c"GetAmxString", PfnGetAmxString),
+        log: get!(c"Log", PfnLog),
+        log_error: get!(c"LogError", PfnLogError),
+        register_forward: get!(c"RegisterForward", PfnRegisterForward),
+        execute_forward: get!(c"ExecuteForward", PfnExecuteForward),
+        is_player_ingame: get!(c"IsPlayerInGame", PfnIsPlayerIngame),
+        amx_exec: get!(c"amx_Exec", PfnAmxExec),
+        amx_allot: get!(c"amx_Allot", PfnAmxAllot),
+        amx_find_public: get!(c"amx_FindPublic", PfnAmxFindPublic),
+        amx_push: get!(c"amx_Push", PfnAmxPush),
+        load_amx_script: get!(c"LoadAmxScript", PfnLoadAmxScript),
         // SAFETY: as in `get!`.
         load_amx_script_ex: (!load_ex.is_null())
             .then(|| unsafe { core::mem::transmute::<*mut core::ffi::c_void, PfnLoadAmxScriptEx>(load_ex) }),
-        unload_amx_script: get!(c"UnloadAmxScript"),
+        unload_amx_script: get!(c"UnloadAmxScript", PfnUnloadAmxScript),
     };
     let _ = CORE.set(fns);
     let _ = LOGTAG.set(logtag);

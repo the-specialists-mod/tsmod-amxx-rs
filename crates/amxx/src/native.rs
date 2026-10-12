@@ -100,11 +100,13 @@ impl Args for AmxArgs<'_> {
     }
 }
 
-/// Runs a native's logic. Only for the trampolines [`natives!`](crate::natives) generates, which
-/// the core calls with its AMX and a `params` array whose first cell is the argument size in
-/// bytes.
+/// Runs a native's logic, for the trampolines [`natives!`](crate::natives) generates.
+///
+/// # Safety
+/// `amx` and `params` are what the core passes a native: its AMX and an array whose first cell
+/// is the size of the arguments that follow, in bytes.
 #[doc(hidden)]
-pub fn dispatch(amx: *mut Amx, params: *const Cell, f: fn(&mut dyn Args) -> Cell) -> Cell {
+pub unsafe fn dispatch(amx: *mut Amx, params: *const Cell, f: fn(&mut dyn Args) -> Cell) -> Cell {
     if params.is_null() {
         return 0;
     }
@@ -127,8 +129,9 @@ macro_rules! natives {
                 $crate::ffi::AmxNativeInfo {
                     name: $name.as_ptr(),
                     func: Some({
-                        extern "C" fn trampoline(amx: *mut $crate::ffi::Amx, params: *const $crate::ffi::Cell) -> $crate::ffi::Cell {
-                            $crate::native::dispatch(amx, params, $f)
+                        unsafe extern "C" fn trampoline(amx: *mut $crate::ffi::Amx, params: *const $crate::ffi::Cell) -> $crate::ffi::Cell {
+                            // SAFETY: the core calls natives with its AMX and `params`.
+                            unsafe { $crate::native::dispatch(amx, params, $f) }
                         }
                         trampoline
                     }),
