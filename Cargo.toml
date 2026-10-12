@@ -1,0 +1,26 @@
+[workspace]
+members = ["crates/amxx"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/the-specialists-mod/tsmod-amxx-rs"
+
+# The port's crates, pinned to the commit that defines the plugin API (`ts-plugin-api`).
+[workspace.dependencies]
+goldsrc-sys = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", rev = "69265b7470fd7367afcb7de780c5ef8a61e4fd5b" }
+ts-plugin-api = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", rev = "69265b7470fd7367afcb7de780c5ef8a61e4fd5b" }
+# Tests only: the port's message encoders, so the parsers are checked against the real wire code.
+shared = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", rev = "69265b7470fd7367afcb7de780c5ef8a61e4fd5b" }
+
+[profile.dev]
+panic = "abort" # unwinding across the C ABI is UB; be explicit
+
+[profile.release]
+panic = "abort"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+debug = true

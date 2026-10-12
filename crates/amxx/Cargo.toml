@@ -1,0 +1,15 @@
+[package]
+name = "amxx"
+description = "AMX Mod X module SDK and metamod plugin glue for Rust (the FFI layer)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+goldsrc-sys.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
