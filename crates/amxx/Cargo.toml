@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 goldsrc-sys.workspace = true
+ts-plugin-api.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

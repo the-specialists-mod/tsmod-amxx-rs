@@ -14,7 +14,7 @@
 //! * [`native`] / [`natives!`]: native tables and their arguments.
 //! * [`engine`]: engine functions and entity fields.
 //! * [`script`]: the stats modules' score plugin.
-//! * [`dl`]: finding the game library's exports.
+//! * [`dl`]: finding the game library's exports; [`tsapi`]: the Rust TS server's plugin API.
 
 pub mod core;
 pub mod dl;
@@ -24,6 +24,7 @@ pub mod meta;
 pub mod module;
 pub mod native;
 pub mod script;
+pub mod tsapi;
 
 pub use ffi::Cell;
 /// The engine bindings, generated from the FWGS headers by the port's `goldsrc-sys`.

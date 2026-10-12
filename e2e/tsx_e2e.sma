@@ -9,6 +9,7 @@
 #include <engine>
 #include <tsx>
 #include <tsfun>
+#include <tsxaddon> // the repo's patched copy: ts_setuserammo is a native
 
 // Registered by tsx (NBase.cpp) but not declared in the stock includes.
 native ts_getuseritems(index);
@@ -173,6 +174,25 @@ public t_give_check()
 	}
 	// Without the API, tsx reads a bot's weapon from its player model (bots get no WeaponInfo).
 	check("giveweapon_visible", wpn == 13, d);
+	if (wpn != 13) return;
+	// ts_setuserammo (tsxaddon.inc's function, now a tsx native): the reserve of the gun in hand.
+	new r = ts_setuserammo(id, 13, 77);
+	if (g_api) {
+		check("setuserammo_returns", r == 1, "");
+		set_task(0.3, "t_ammo_check");
+	} else {
+		check("setuserammo_without_api", r == 0, "");
+	}
+}
+
+public t_ammo_check()
+{
+	new id = g_give_id, clip, ammo, mode, extra, d[96];
+	if (!is_user_alive(id)) { skip("setuserammo_visible", "player died"); return; }
+	new wpn = ts_getuserwpn(id, clip, ammo, mode, extra);
+	formatex(d, charsmax(d), "wpn=%d clip=%d ammo=%d", wpn, clip, ammo);
+	if (wpn != 13) { skip("setuserammo_visible", d); return; }
+	check("setuserammo_visible", ammo == 77, d);
 }
 
 public t_stats()

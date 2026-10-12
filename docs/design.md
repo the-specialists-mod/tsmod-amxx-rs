@@ -59,6 +59,9 @@ smaller than tsx's `PluginApi` (version 1) is refused. The lookup runs at `AMXX_
 and again at each `ServerActivate` until it succeeds; a server without the API gets one warning
 in the AMX Mod X log.
 
+tsx needs only the version-1 part of the table (`amxx::tsapi::V1_SIZE`), so it runs on any
+server with the API; hamsandwich needs version 2 (section 8).
+
 Contract (`ts-plugin-api` docs and the port's `docs/implementation/plugin-api.md`): entity
 indices, engine thread only; `player_info` returns a snapshot refreshed each frame, so a getter
 right after a setter shows the old value until the next frame; setters called inside the
@@ -148,6 +151,8 @@ Differences:
 * `ts_get_message`: no award reads as `TSMSG_NORMAL` (6); `ts_set_message(6)` clears it.
 * `ts_set_bullettrail` does nothing (the server answers UNSUPPORTED).
 * `custom_weapon_add` stores its log name (upstream ignored the argument).
+* `ts_setuserammo` (port addition): `tsxaddon.inc`'s private-data function as a native, through
+  the API's `set_weapon_ammo`; the repository ships the patched `include/tsxaddon.inc`.
 
 ## 7. Testing
 

@@ -200,6 +200,18 @@ impl Engine {
         unsafe { cstr_lossy(v) }
     }
 
+    /// `CLIENT_COMMAND(e, "%s\n", cmd)`, as AMX Mod X's `client_cmd` sends it.
+    pub fn client_command(&self, e: Edict, cmd: &str) {
+        if e.is_null() {
+            return;
+        }
+        let c = c_string(&format!("{cmd}\n"));
+        if let Some(f) = self.f.pfnClientCommand {
+            // SAFETY: the engine's variadic printf-style function with "%s" and one C string.
+            unsafe { f(e.0, c"%s".as_ptr() as *mut c_char, c.as_ptr()) };
+        }
+    }
+
     /// `SERVER_PRINT`.
     pub fn server_print(&self, msg: &str) {
         let m = c_string(msg);

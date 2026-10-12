@@ -190,15 +190,17 @@ fn compile_plugin(scripting: &Path, out: &Path) -> Result<(), String> {
     let sma = root().join("e2e/tsx_e2e.sma");
     std::fs::create_dir_all(out.parent().unwrap()).map_err(|e| e.to_string())?;
     let mut c = Command::new(scripting.join("amxxpc"));
+    // The repo's include/ first: its tsxaddon.inc declares the ts_setuserammo native.
     c.env("LD_LIBRARY_PATH", scripting)
         .arg(&sma)
+        .arg(format!("-i{}", root().join("include").display()))
         .arg(format!("-i{}", scripting.join("include").display()))
         .arg(format!("-o{}", out.display()));
     // amxxpc writes `<out>.amx` scratch files next to the current directory.
     c.current_dir(out.parent().unwrap());
     let o = c.output().map_err(|e| format!("amxxpc: {e}"))?;
     if !o.status.success() || !out.exists() {
-        return Err(format!("amxxpc failed:\n{}", String::from_utf8_lossy(&o.stdout)));
+        return Err(format!("amxxpc failed ({}):\n{}{}", o.status, String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)));
     }
     Ok(())
 }

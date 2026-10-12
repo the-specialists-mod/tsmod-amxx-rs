@@ -256,3 +256,22 @@ fn custom_weapons() {
     assert_eq!(stats::cwpn_shot(&g, &mut shot), 1);
     assert_eq!(with(|s| s.players[1].weapons[39].stats.shots), Some(1));
 }
+
+#[test]
+fn setuserammo_follows_the_tsxaddon_function() {
+    let g = FakeGame::with_api();
+    joined(&g, &[1]);
+    let run = |w: Cell, n: Cell| base::set_user_ammo(&g, &mut FakeArgs::new(&[1, w, n]));
+    assert_eq!(run(36, 5), 0, "kung fu");
+    assert_eq!(run(40, 5), 0, "invalid");
+    assert_eq!(run(34, 5), 0, "katana");
+    assert_eq!(run(13, 77), 1);
+    assert_eq!(run(24, 3), 1);
+    let cmds: Vec<String> = g.commands.borrow().iter().map(|(_, c)| c.clone()).collect();
+    assert_eq!(cmds, ["weapon_0", "weapon_34", "weapon_13", "weapon_24"]);
+    let calls = g.api.as_ref().unwrap().calls.borrow().clone();
+    assert_eq!(calls, ["set_weapon_ammo 1 13 -1 77", "set_weapon_ammo 1 24 3 -1"], "reserve for guns, clip for grenades and knives");
+    let none = FakeGame::new();
+    assert_eq!(base::set_user_ammo(&none, &mut FakeArgs::new(&[1, 13, 5])), 0);
+    assert_eq!(none.logs.borrow().len(), 1);
+}

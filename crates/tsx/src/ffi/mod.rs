@@ -207,6 +207,7 @@ bind! {
     n_is_running_powerup => base::is_running_powerup,
     n_force_powerup_run => base::force_powerup_run,
     n_get_user_weapon => base::get_user_weapon,
+    n_set_user_ammo => base::set_user_ammo,
     n_get_stats => stats::get_stats,
     n_get_statsnum => stats::get_statsnum,
     n_get_user_astats => stats::get_user_astats,
@@ -276,6 +277,8 @@ amxx::natives! {
         c"ts_force_run_powerup" => n_force_powerup_run,
         c"get_weaponname" => n_get_weapon_name,
         c"get_user_weapon" => n_get_user_weapon,
+        // Port addition: tsxaddon.inc's function, now a native (include/tsxaddon.inc).
+        c"ts_setuserammo" => n_set_user_ammo,
     ];
 }
 
@@ -291,8 +294,8 @@ mod tests {
             // SAFETY: the table's names are `'static` C string literals.
             .map(|n| unsafe { core::ffi::CStr::from_ptr(n.name) }.to_string_lossy().into())
             .collect();
-        // 13 in stats_Natives and 39 in base_Natives (NRank.cpp, NBase.cpp).
-        assert_eq!(names.len(), 52);
+        // 13 in stats_Natives and 39 in base_Natives (NRank.cpp, NBase.cpp), plus ts_setuserammo.
+        assert_eq!(names.len(), 53);
         let mut sorted = names.clone();
         sorted.sort();
         sorted.dedup();

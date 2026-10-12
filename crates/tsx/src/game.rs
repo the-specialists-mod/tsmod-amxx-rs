@@ -17,6 +17,8 @@ pub trait TsApi {
     fn set_speed(&self, player: i32, speed: f32, aura: f32, duration: f32) -> Result<(), i32>;
     fn set_physics_speed(&self, player: i32, speed: f32) -> Result<(), i32>;
     fn set_bullet_trail(&self, player: i32, on: bool) -> Result<(), i32>;
+    /// Sets the clip and reserve of the player's weapon `weapon` (negative: unchanged).
+    fn set_weapon_ammo(&self, player: i32, weapon: i32, clip: i32, ammo: i32) -> Result<(), i32>;
     /// The player behind a projectile: `Ok(0)` for none.
     fn projectile_owner(&self, entity: i32) -> Result<i32, i32>;
 }
@@ -77,6 +79,9 @@ pub trait Game {
     fn api(&self) -> Option<&dyn TsApi>;
     /// A line in the AMX Mod X log.
     fn log(&self, msg: &str);
+    /// `client_cmd(player, cmd)`: a command for the player's client to run (`CLIENT_COMMAND`;
+    /// the engine drops it for bots).
+    fn client_cmd(&self, player: i32, cmd: &str);
 
     /// `ts_giveweapon`'s entity dance: a `ts_groundweapon` with the keys, spawned at the
     /// player and used by them, then removed. False if the entity couldn't be created.

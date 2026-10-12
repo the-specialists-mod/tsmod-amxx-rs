@@ -51,7 +51,9 @@ ID, 2 IP), `tsstats_rankbots` (1), `tsstats_pause` (1 stops stats). Localinfo `t
 ## Native compatibility
 
 Every native upstream tsx registers (`NBase.cpp`, `NRank.cpp`) is registered with the same name
-and arguments.
+and arguments, plus `ts_setuserammo`. tsx.inc, tsfun.inc, tsconst.inc and tsstats.inc are AMX
+Mod X's own (use those shipped with AMX Mod X); only `tsxaddon.inc` needs this repository's
+copy.
 
 * **exact**: same behaviour as upstream.
 * **API**: reads or writes the server through the plugin API. Getters fall back to what the
@@ -77,6 +79,7 @@ and arguments.
 | `ts_is_running_powerup` | API | 0 without the API |
 | `ts_is_in_slowmo` | API, approx. | When the player is slowed, the time their power-up ends (a float, as upstream); else 0 |
 | `ts_set_speed`, `ts_set_physics_speed` | API | Speed 0-2 |
+| `ts_setuserammo` | API, port addition | Was a function in `tsxaddon.inc` that wrote TS 2.x's private data; now a tsx native with its behaviour (see below) |
 | `ts_set_bullettrail` | unsupported | TS 3.0 has no per-player bullet trails; returns 0 |
 | `ts_giveweapon`, `ts_createpwup`, `ts_givepwup` | exact | Same entity approach (`ts_groundweapon` / `ts_powerup`, KeyValue, Spawn, Use/Touch). `ts_createpwup`'s origin is optional, as `tsfun.inc` declares one argument |
 | `ts_getuserlastfrag`, `ts_getuserkillflags` | exact | tsx's own frag bookkeeping |
@@ -93,9 +96,22 @@ fu is 36 and a thrown knife 37. TS 3.0's own weapons 36 (Contender G2) and 37 (A
 Skorpions) share those ids, as they did with upstream tsx on TS 3.0. The real plugins treat 36
 as kung fu.
 
-Not fixable in a module: plugins that read or write player private data themselves (e.g.
-`tsxaddon.inc`'s `ts_setuserammo`, fakemeta `get_pdata_*`, hamsandwich on players) don't work
-on the Rust server.
+### `ts_setuserammo` and `tsxaddon.inc`
+
+`tsxaddon.inc` (a third-party include many TS plugins use) defined `ts_setuserammo(id, weapon,
+ammo)` as a function that wrote TS 2.x's private data. tsx now provides it as a native with the
+same visible behaviour: 0 for kung fu (36, after `client_cmd(id, "weapon_0")`), for ids outside
+0-35, C4 (29) and the katana (34); otherwise it runs `client_cmd(id, "weapon_<id>")`, sets the
+weapon's reserve ammo (for the grenade and knives, 24/25/35, its clip) through the plugin API
+and returns 1 (0 if the player doesn't own the weapon, or without the API, logged once).
+
+To use it, **recompile the plugin against [`include/tsxaddon.inc`](include/tsxaddon.inc)** from
+this repository (the original minus that function, plus the native's declaration). Plugins
+already compiled with the old include keep their own copy of the function, which on the Rust
+server reads and writes zeroed private data and does nothing.
+
+Not fixable in a module: other plugin code that reads or writes private data itself (fakemeta
+`get_pdata_*`/`set_pdata_*` with TS offsets) gets zeros on the Rust server.
 
 ## Building
 

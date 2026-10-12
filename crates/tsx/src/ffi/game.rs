@@ -9,7 +9,7 @@ use crate::game::{Event, Game, PlayerInfo, TsApi};
 use amxx::core::Forward;
 use amxx::engine::{Edict, engine};
 use amxx::meta::gamedll;
-use core::ffi::{c_char, c_int, c_void};
+use core::ffi::c_int;
 use core::sync::atomic::{AtomicI32, AtomicPtr, Ordering};
 use goldsrc_sys::{DEAD_NO, FL_CLIENT, FL_FAKECLIENT};
 use std::ffi::CString;
@@ -23,36 +23,19 @@ static API: AtomicPtr<PluginApi> = AtomicPtr::new(core::ptr::null_mut());
 
 /// The plugin API table, once [`find_api`] found it.
 fn api_table() -> Option<&'static PluginApi> {
-    // SAFETY: NULL or the server's static table (`find_api` checked its size), which lives as
-    // long as the game library.
+    // SAFETY: NULL or the server's static table (`find_api` checked that it has the version-1
+    // fields, the only ones tsx reads), which lives as long as the game library.
     unsafe { API.load(Ordering::Relaxed).as_ref() }
 }
 
-type CreateInterfaceFn = unsafe extern "C" fn(name: *const c_char, rc: *mut c_int) -> *mut c_void;
-
-/// Looks the API up in the loaded game library (`GINFO_REALDLL_FULLPATH`, then
-/// `CreateInterface(INTERFACE_NAME)`). Returns why it isn't available, for the log.
+/// Looks the API up in the loaded game library; tsx needs only the version-1 part of the
+/// table, so it also runs on servers without the entity hooks. Returns why it isn't available.
 pub fn find_api() -> Result<(), String> {
     if api_table().is_some() {
         return Ok(());
     }
-    let path = amxx::meta::game_dll_path().ok_or("metamod didn't name the game library")?;
-    let sym = amxx::dl::loaded_symbol(&path, c"CreateInterface").ok_or_else(|| format!("{path} exports no CreateInterface"))?;
-    // SAFETY: tier1's `CreateInterface(const char*, int*)` signature, which the plugin API's
-    // documentation fixes.
-    let create: CreateInterfaceFn = unsafe { core::mem::transmute::<*mut c_void, CreateInterfaceFn>(sym) };
-    let mut rc = 1;
-    // SAFETY: a C string and an out-pointer for the return code.
-    let p = unsafe { create(ts_plugin_api::INTERFACE_NAME.as_ptr(), &mut rc) } as *mut PluginApi;
-    if p.is_null() {
-        return Err(format!("{path} has no {}", ts_plugin_api::INTERFACE_NAME.to_string_lossy()));
-    }
-    // SAFETY: a non-NULL table from the server; `size` and `version` are its first fields.
-    let (size, version) = unsafe { ((*p).size, (*p).version) };
-    if (size as usize) < size_of::<PluginApi>() || version < 1 {
-        return Err(format!("the server's plugin API is too old (version {version}, {size} bytes)"));
-    }
-    API.store(p, Ordering::Relaxed);
+    let t = amxx::tsapi::find(amxx::tsapi::V1_SIZE, 1)?;
+    API.store(t as *const PluginApi as *mut PluginApi, Ordering::Relaxed);
     Ok(())
 }
 
@@ -90,6 +73,9 @@ impl TsApi for RealApi {
     }
     fn set_bullet_trail(&self, player: i32, on: bool) -> Result<(), i32> {
         rc((self.0.set_bullet_trail)(player, on as c_int))
+    }
+    fn set_weapon_ammo(&self, player: i32, weapon: i32, clip: i32, ammo: i32) -> Result<(), i32> {
+        rc((self.0.set_weapon_ammo)(player, weapon, clip, ammo))
     }
     fn projectile_owner(&self, entity: i32) -> Result<i32, i32> {
         let r = (self.0.projectile_owner)(entity);
@@ -191,6 +177,11 @@ impl Game for RealGame {
     }
     fn log(&self, msg: &str) {
         amxx::core::log(msg);
+    }
+    fn client_cmd(&self, player: i32, cmd: &str) {
+        if let Some(e) = engine() {
+            e.client_command(self.ent(player), cmd);
+        }
     }
 
     fn give_weapon(&self, player: i32, weapon: i32, clips: i32, flags: i32) -> bool {

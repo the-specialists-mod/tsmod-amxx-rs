@@ -70,6 +70,9 @@ impl TsApi for FakeApi {
     fn set_bullet_trail(&self, p: i32, on: bool) -> Result<(), i32> {
         self.call(format!("set_bullet_trail {p} {on}"))
     }
+    fn set_weapon_ammo(&self, p: i32, w: i32, c: i32, a: i32) -> Result<(), i32> {
+        self.call(format!("set_weapon_ammo {p} {w} {c} {a}"))
+    }
     fn projectile_owner(&self, _e: i32) -> Result<i32, i32> {
         Ok(self.knife_owner.get())
     }
@@ -84,6 +87,7 @@ pub struct FakeGame {
     pub logs: RefCell<Vec<String>>,
     pub fired: RefCell<Vec<Event>>,
     pub given: RefCell<Vec<(i32, i32, i32, i32)>>,
+    pub commands: RefCell<Vec<(i32, String)>>,
 }
 
 impl FakeGame {
@@ -180,6 +184,9 @@ impl Game for FakeGame {
     }
     fn log(&self, msg: &str) {
         self.logs.borrow_mut().push(msg.into());
+    }
+    fn client_cmd(&self, p: i32, cmd: &str) {
+        self.commands.borrow_mut().push((p, cmd.into()));
     }
     fn give_weapon(&self, p: i32, w: i32, c: i32, f: i32) -> bool {
         self.given.borrow_mut().push((p, w, c, f));

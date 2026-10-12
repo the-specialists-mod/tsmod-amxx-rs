@@ -377,3 +377,26 @@ pub fn ts_setup(_g: &dyn Game, a: &mut dyn Args) -> Cell {
 pub fn register_forward(_g: &dyn Game, _a: &mut dyn Args) -> Cell {
     1
 }
+
+/// `ts_setuserammo(id, weapon, ammo)`, upstream a `tsxaddon.inc` function that wrote TS 2.x's
+/// private data (Avalanche, Twilight Suzuka, Harbu). Port addition as a native, with that
+/// function's visible behaviour: kung fu (36) switches to it and gives 0; other ids outside
+/// 0..35, C4 (29) and the katana (34) give 0; otherwise it switches to the weapon and sets its
+/// reserve, or for the grenade and the knives (24, 25, 35) its clip, through the plugin API.
+pub fn set_user_ammo(g: &dyn Game, a: &mut dyn Args) -> Cell {
+    let Some(id) = super::player(g, a, "Player {} is not valid") else { return 0 };
+    let (weapon, ammo) = (a.cell(2), a.cell(3));
+    if weapon == KUNG_FU as Cell {
+        g.client_cmd(id as i32, "weapon_0");
+        return 0;
+    }
+    if !(0..=35).contains(&weapon) {
+        return 0;
+    }
+    g.client_cmd(id as i32, &format!("weapon_{weapon}"));
+    if weapon == 29 || weapon == 34 {
+        return 0;
+    }
+    let (clip, reserve) = if matches!(weapon, 24 | 25 | 35) { (ammo, -1) } else { (-1, ammo) };
+    api_call(g, "ts_setuserammo", |api| api.set_weapon_ammo(id as i32, weapon, clip, reserve))
+}
