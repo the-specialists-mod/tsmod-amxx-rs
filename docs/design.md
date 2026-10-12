@@ -1,7 +1,8 @@
 # Design
 
-How the Rust tsx and tsfun work, and where they differ from upstream AMX Mod X
-(`modules/ts/tsx`, version 1.10). Upstream file names below are that directory's.
+How the Rust tsx, tsfun and hamsandwich work, and where they differ from upstream AMX Mod X
+(`modules/ts/tsx` and `modules/hamsandwich`, version 1.10). Upstream file names in sections 1-7
+are tsx's; section 8 is hamsandwich.
 
 ## 1. Crates and the `unsafe` boundary
 
@@ -11,6 +12,7 @@ crates/amxx/    the AMX Mod X module SDK and metamod glue (all FFI): repr(C) ABI
                 edict wrappers, the score-plugin loader, finding the game library's exports
 crates/tsx/     the TSX module (cdylib + rlib): deny(unsafe_code) except `ffi`
 crates/tsfun/   the TSFun wrapper (cdylib): module info only
+crates/hamsandwich/  Ham Sandwich (cdylib + rlib): deny(unsafe_code) except `ffi` (section 8)
 xtask/          build, dist, lint, test, e2e
 e2e/            the end-to-end test plugin
 ```
@@ -163,3 +165,70 @@ Differences:
 * `cargo xtask e2e [linux] [win]`: see AGENTS.md. On 2026-10-12, against the port at `f585a02`
   (with the API), both ReHLDS roots passed all 17 checks; against a build without the API, the
   13 checks that apply passed and the setters returned 0 with one log line each.
+
+## 8. Ham Sandwich
+
+Stock hamsandwich creates an entity of the class, finds its C++ vtable through the private data
+(gamedata offsets), and replaces the function's entry with a trampoline that runs the plugins'
+forwards around the original. The Rust server's entities have no vtables (an edict's private
+data is a zeroed block with a slab handle), so stock reads garbage (Linux) or crashes (Windows).
+
+The port's plugin API version 2 offers entity hooks instead: one hook function per plugin
+(`ham_set_hook`), functions turned on by number (`ham_watch`, `Ham` enum numbers), classes by
+id (`class_id`, `entity_class_id`), `ham_supported`, and `ham_execute`. The server calls the hook
+before (`post` 0) and after (`post` 1) each watched function with a `HamCall`; arguments are
+hamsandwich's signature for that function (`hook_native.cpp`), entities as indices.
+
+**The table** (`hooklist.rs`): all 481 `Ham` functions with stock's hook names and signatures,
+generated from `hook_native.cpp` and `ham_const.inc` by `gen_hooklist.py`. `V_REMOVED` entries
+fail with HAM_FUNC_NOT_AVAILABLE, the `Deprecated` one with HAM_FUNC_NOT_CONFIGURED.
+
+**Registration** (`natives.rs`): `CHECK_FUNCTION` as stock, with "configured in gamedata" meaning
+"the server has the function": `ham_watch(ham, current setting)` answers without changing
+anything (cached). The class comes from `class_id(classname)` (or `entity_class_id`); a class
+whose `ham_supported` is UNSUPPORTED is the "Failed to retrieve vtable" native error. The forward
+is `RegisterSPForwardByName(amx, callback, this, params...)` with stock's parameter list (vectors
+as arrays, strings as strings, floats as cells holding the bits: the core's `ExecuteForward` reads
+`FP_FLOAT` as a double). The first hook for a function turns it on with `ham_watch`. Handles are
+indices + 1; `OnPluginsUnloaded` drops every hook and turns the functions off.
+
+**Dispatch** (`state.rs`), stock's `hook_callbacks.cpp` protocol, on a stack of frames keyed by
+the `HamCall` address:
+
+* before: push a frame (`this` as parameter 1, then the arguments, `ret`/`origret` zero), run the
+  pre forwards one at a time with the module state released. Each sees the parameters as earlier
+  forwards set them; `result` is the highest return, `thisresult` the last. Then the (possibly
+  changed) arguments go back into the `HamCall`, and at `result >= HAM_SUPERCEDE` the hook answers
+  SUPERCEDE (the function doesn't run).
+* after (the server calls it after a supercede too, with `orig_ret` zero): record `orig_ret` and
+  any pointer arguments the function wrote, run the post forwards, pop the frame, and answer
+  OVERRIDE with `ret` when `thisresult >= HAM_OVERRIDE`, else CONTINUE (the function's value), as
+  stock's `CHECK_RETURN`. So a superceded call with an ignoring post forward returns 0, as stock.
+
+The data natives (`GetHamReturn*`, `SetHamParam*`, ...) work on the top frame with `Data`'s type
+rules and messages (`"Wrong data type (data is of type float)"`, `"Data pointer is NULL!"`,
+`"ParamStack is empty!"`). Strings handed to the server live until the call's post (a returned
+string until the next one).
+
+**ExecuteHam(B)** (`call_funcs.cpp`): the arguments by reference after `this`, `CHECK_ENTITY` on
+`this` and entity arguments, a null TraceResult refused; `ham_execute` with `run_hooks` 0 or 1;
+pointer arguments written back; Float/Vector results into the next by-reference parameter, Str
+into a buffer and length, others returned. Errors from the server (BUSY: the entity is inside
+one of its own functions) are native errors.
+
+**ItemInfo**: handles are `ItemInfo *`, as stock. The module accepts only those it created or
+that a call in progress passed, so a bad handle is a native error instead of a crash.
+
+**pdata natives**: `get_pdata_cbase(_safe)` and `set_pdata_cbase` keep stock's checks but never
+touch the private data: -1 (null) and a no-op.
+
+**Without API version 2** the module loads, logs one warning and registers its natives;
+`IsHamValid` is 0 and `RegisterHam`/`ExecuteHam` fail through `__fatal_ham_error` as stock does
+for functions missing from its gamedata.
+
+**Tests**: `src/tests.rs` drives the dispatcher with a fake host that is both AMX Mod X (forwards
+are closures calling natives) and the server (a tiny game with health, following the hook
+protocol): parameter changes, supercede and the last-result return rule, override in post,
+`SetHamParamEntity` vs `Entity2`, nested `ExecuteHamB` from a forward, ExecuteHam without hooks,
+type errors, ItemInfo, pdata. `e2e/ham_e2e.sma` hooks Spawn, TakeDamage (pre and post), Killed,
+Touch and Think on a live server and checks health after halved and superceded damage.

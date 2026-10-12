@@ -1,10 +1,12 @@
 # tsmod-amxx-rs: AMX Mod X's TS modules for the Rust TS server
 
-AMX Mod X's two modules for The Specialists, **tsx** and **tsfun**, ported to Rust for servers
-running [the Rust port of The Specialists 3.0](https://github.com/the-specialists-mod/the-specialistsmod-rs).
-Existing compiled plugins (`.amxx`) that use `tsx.inc`, `tsfun.inc` or `tsstats.inc` run
-unchanged: the modules register the same natives, forwards, library names and cvars, and read
-and write the same `tsstats.dat`.
+AMX Mod X's modules for The Specialists, **tsx** and **tsfun**, and **hamsandwich**, ported to
+Rust for servers running [the Rust port of The Specialists 3.0](https://github.com/the-specialists-mod/the-specialistsmod-rs).
+Existing compiled plugins (`.amxx`) that use `tsx.inc`, `tsfun.inc`, `tsstats.inc` or
+`hamsandwich.inc` run unchanged: the modules register the same natives, forwards, library names
+and cvars, and read and write the same `tsstats.dat`. AMX Mod X's stock hamsandwich can't work on
+the Rust server (it patches C++ vtables the server doesn't have, and crashes on Windows); this one
+replaces it.
 
 Upstream tsx read and wrote TS's C++ `CBasePlayer` at fixed offsets (from TS 2.x). The Rust
 server has no such object, so this tsx reads the game's user messages, as upstream also did,
@@ -16,12 +18,16 @@ the weapon in hand.
 |---|---|---|---|
 | TSX | `tsx`, class `xstats` | `tsx_amxx_i386.so` / `tsx_amxx.dll` | All the TS natives, the stats natives, `client_damage` / `client_death`, the rank. A metamod plugin too. |
 | TSFun Wrapper | `tsfun` | `tsfun_amxx_i386.so` / `tsfun_amxx.dll` | Empty, as upstream: lets plugins with `#include <tsfun>` (`#pragma reqlib tsfun`) load. |
+| Ham Sandwich | `hamsandwich` | `hamsandwich_amxx_i386.so` / `hamsandwich_amxx.dll` | `RegisterHam`, `ExecuteHam` and the rest, over the server's entity hooks (plugin API version 2). Replaces AMX Mod X's file of the same name. A metamod plugin too. |
 
 ## Requirements
 
 * The Rust TS server ([the-specialistsmod-rs](https://github.com/the-specialists-mod/the-specialistsmod-rs))
   on Linux or Windows, with the plugin API (`main` from `f585a02` on; releases after v0.2.0).
   Older builds work too, but the natives that change players do nothing (see below).
+  hamsandwich needs version 2 of the API (entity hooks, branch `plugin-api-v2`); without it,
+  `IsHamValid` is false and `RegisterHam`/`ExecuteHam` fail as stock does for functions missing
+  from its gamedata.
 * AMX Mod X 1.10 or 1.9 (1.8.2 should load: the module only requests functions that exist
   there).
 * Metamod: Metamod-R or metamod-p (interface 5:13). AMX Mod X loads tsx as a metamod plugin
@@ -32,8 +38,9 @@ the weapon in hand.
 
 1. Download the archive for your platform from the
    [releases](https://github.com/the-specialists-mod/tsmod-amxx-rs/releases) and copy its
-   `addons/` directory over your server's `ts/addons/`. That puts the two modules in
-   `addons/amxmodx/modules/`, replacing AMX Mod X's own tsx/tsfun.
+   `addons/` directory over your server's `ts/addons/`. That puts the three modules in
+   `addons/amxmodx/modules/`, replacing AMX Mod X's own tsx, tsfun and hamsandwich (same file
+   names), and the patched `tsxaddon.inc` in `addons/amxmodx/scripting/include/`.
 2. Plugins that include `tsx.inc`/`tsfun.inc` load the modules automatically. Otherwise add
    `tsx` and `tsfun` lines to `addons/amxmodx/configs/modules.ini`.
 3. Optional, for the stats plugins (`statsx`, `tsstats`): `addons/amxmodx/data/tsstats.amxx`
@@ -42,6 +49,8 @@ the weapon in hand.
 4. Check with `amxx modules` (TSX and TSFun Wrapper "running") and in the AMX Mod X log. On a
    server without the plugin API, tsx logs one warning:
    `[TSX] WARNING: no TS plugin API (...)`.
+
+hamsandwich needs no gamedata files (`data/gamedata/.../ts/offsets*`); it ignores them.
 
 Cvars (as upstream): `tsstats_maxsize` (3500: the rank is cleared at map change when it is
 this long), `tsstats_reset` (1: clear at the next map change), `tsstats_rank` (0 name, 1 Steam
@@ -96,6 +105,25 @@ fu is 36 and a thrown knife 37. TS 3.0's own weapons 36 (Contender G2) and 37 (A
 Skorpions) share those ids, as they did with upstream tsx on TS 3.0. The real plugins treat 36
 as kung fu.
 
+### Ham Sandwich
+
+Every native of AMX Mod X 1.10's hamsandwich is registered with stock's name, arguments, return
+values and error messages. Functions are `ham_const.inc`'s `Ham` enum; the server decides which it
+has (`IsHamValid`) and for which classes.
+
+| Natives | Status | Notes |
+|---|---|---|
+| `RegisterHam`, `RegisterHamFromEntity` (and the `RegisterHamPlayer` stock) | exact | Hooks are per class, as stock's per-vtable hooks. A function the server lacks fails the plugin through `__fatal_ham_error`/`HamFilter` like stock's "not configured in gamedata"; an unknown class or one without the function is a native error. `specialbot` needs nothing (every player is one class) |
+| `EnableHamForward`, `DisableHamForward`, `IsHamValid` | exact | `IsHamValid` is "the server has this function" |
+| `ExecuteHam`, `ExecuteHamB` | exact | Arguments by reference as stock; float, vector and string results go to the extra by-reference parameters; pointer arguments are written back. `ExecuteHamB` runs the hooks |
+| `GetHamReturnStatus`, `GetHamReturn*`, `GetOrigHamReturn*`, `SetHamReturn*`, `SetHamParam*` | exact | Parameter 1 is `this`. Pre forwards see earlier forwards' changes; the highest result skips the function at `HAM_SUPERCEDE`; post forwards run even then; the last forward's result decides whether the return value is the plugin's (`HAM_OVERRIDE` or more) or the function's, as stock. `SetHamParamEntity` keeps the index later forwards see, `SetHamParamEntity2` updates it |
+| `SetHamParamTraceResult`, `SetHamParamItemInfo` | exact | TraceResults are handles fakemeta's `get_tr2`/`set_tr2` take |
+| `CreateHamItemInfo`, `FreeHamItemInfo`, `GetHamItemInfo`, `SetHamItemInfo` | approx. | An unknown handle is a native error (stock dereferences any value) |
+| `get_pdata_cbase`, `get_pdata_cbase_safe`, `set_pdata_cbase` | approx. | Entity and offset checks as stock; TS's C++ offsets don't exist on the Rust server, so reads give -1 (null) and writes do nothing (logged once) |
+
+The server's own entities run what TS ran; functions the port never calls for a class (say,
+`Ham_Think` on players) never fire, as with a vtable entry the game never calls.
+
 ### `ts_setuserammo` and `tsxaddon.inc`
 
 `tsxaddon.inc` (a third-party include many TS plugins use) defined `ts_setuserammo(id, weapon,
@@ -111,7 +139,8 @@ already compiled with the old include keep their own copy of the function, which
 server reads and writes zeroed private data and does nothing.
 
 Not fixable in a module: other plugin code that reads or writes private data itself (fakemeta
-`get_pdata_*`/`set_pdata_*` with TS offsets) gets zeros on the Rust server.
+`get_pdata_*`/`set_pdata_*` with TS offsets) gets zeros on the Rust server. Hooks through
+hamsandwich work (above).
 
 ## Building
 
@@ -122,8 +151,8 @@ this repository with its `3rdparty/library_suffix` submodule (or set `FWGS_DIR`)
 bindings come from the port's `goldsrc-sys` crate, which generates them from the FWGS headers.
 
 ```sh
-cargo xtask build [--release]    # tsx and tsfun for i686 Linux and Windows
-cargo xtask dist                 # dist/<platform>/addons/amxmodx/modules/, stripped
+cargo xtask build [--release]    # tsx, tsfun, hamsandwich for i686 Linux and Windows
+cargo xtask dist                 # dist/<platform>/addons/amxmodx/{modules,scripting/include}/, stripped
 cargo xtask test                 # unit tests (host and i686)
 cargo xtask lint                 # rustfmt check, clippy -D warnings for both targets
 cargo xtask e2e [linux] [win]    # end-to-end on the amxx-testenv roots (see AGENTS.md)
@@ -137,12 +166,12 @@ Pushing a `v*` tag builds both platforms and publishes `tsmod-amxx-rs-<tag>-<pla
 | Doc | Contents |
 |---|---|
 | [AGENTS.md](AGENTS.md) | Working in this repository: layout, the `unsafe` boundary, commands, conventions, pitfalls |
-| [docs/design.md](docs/design.md) | How the modules work: loading, the plugin API lookup, message parsing, stats and the rank file, deviations from upstream |
+| [docs/design.md](docs/design.md) | How the modules work: loading, the plugin API lookup, message parsing, stats and the rank file, hamsandwich's dispatch, deviations from upstream |
 
 ## License and credits
 
 GPL-3.0-or-later, with AMX Mod X's linking exceptions ([LICENSE](LICENSE),
-[LICENSE-EXCEPTION.txt](LICENSE-EXCEPTION.txt)). This is a port of AMX Mod X's TS modules and
-module SDK: Copyright (C) The AMX Mod X Development Team; tsx originally by Lukasz Wlasinski
-(2004), based on AMX Mod by Aleksander Naszko ("OLO"). Metamod's interface: Will Day
+[LICENSE-EXCEPTION.txt](LICENSE-EXCEPTION.txt)). This is a port of AMX Mod X's TS modules,
+hamsandwich and module SDK: Copyright (C) The AMX Mod X Development Team; tsx originally by Lukasz Wlasinski
+(2004), based on AMX Mod by Aleksander Naszko ("OLO"). `include/tsxaddon.inc`: Avalanche, Twilight Suzuka and Harbu. Metamod's interface: Will Day
 (metamod), the metamod-p and Metamod-R teams. The Specialists by The Specialists team.

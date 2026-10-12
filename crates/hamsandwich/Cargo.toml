@@ -1,0 +1,18 @@
+[package]
+name = "hamsandwich"
+description = "AMX Mod X's Ham Sandwich module for the Rust port of The Specialists 3.0, over the server's entity hooks"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# xtask renames the output to AMX Mod X's file names (hamsandwich_amxx_i386.so, hamsandwich_amxx.dll).
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+amxx = { path = "../amxx" }
+goldsrc-sys.workspace = true
+ts-plugin-api.workspace = true
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"

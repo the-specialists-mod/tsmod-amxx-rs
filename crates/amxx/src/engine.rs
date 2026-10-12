@@ -92,6 +92,11 @@ impl Engine {
         self.globals().time
     }
 
+    /// `gpGlobals->maxEntities`.
+    pub fn max_entities(&self) -> i32 {
+        self.globals().maxEntities
+    }
+
     /// `gpGlobals->maxClients`.
     pub fn max_clients(&self) -> i32 {
         self.globals().maxClients
@@ -258,6 +263,12 @@ impl Edict {
     pub fn is_free(self) -> bool {
         // SAFETY: as in `field!`.
         self.is_null() || unsafe { (*self.0).free } != 0
+    }
+
+    /// Whether the game attached private data (`pvPrivateData != NULL`).
+    pub fn has_private_data(self) -> bool {
+        // SAFETY: as in `field!`.
+        !self.is_null() && !unsafe { (*self.0).pvPrivateData }.is_null()
     }
 
     field!(/// `pev->flags`.

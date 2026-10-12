@@ -1,12 +1,12 @@
 //! Build, package and test tooling: `cargo xtask <command>`.
 //!
 //! ```text
-//! build [--release]          tsx and tsfun for i686 Linux and Windows
-//! dist [--debug-info]        release build -> dist/<platform>/addons/amxmodx/modules/ (stripped
+//! build [--release]          tsx, tsfun and hamsandwich for i686 Linux and Windows
+//! dist [--debug-info]        release build -> dist/<platform>/addons/amxmodx/{modules,scripting/include}/ (stripped
 //!                            unless --debug-info), with AMX Mod X's file names
 //! lint                       cargo fmt --check, clippy -D warnings on both targets
 //! test                       unit tests on the host and on i686 Linux (the ABI layout tests)
-//! e2e [linux] [win]          modules + e2e/tsx_e2e.sma on the amxx-testenv roots, a bot match on
+//! e2e [linux] [win]          modules + e2e/*.sma (tsx, hamsandwich) on the amxx-testenv roots, a bot match on
 //!                            ts_dojo, then the plugin's checks (default: linux)
 //! ```
 //!
@@ -24,7 +24,7 @@ struct Target {
     triple: &'static str,
     platform: &'static str,
     /// (cargo output file, AMX Mod X module file).
-    files: [(&'static str, &'static str); 2],
+    files: [(&'static str, &'static str); 3],
     strip: &'static str,
 }
 
@@ -32,13 +32,17 @@ const TARGETS: [Target; 2] = [
     Target {
         triple: "i686-unknown-linux-gnu",
         platform: "linux-i686",
-        files: [("libtsx.so", "tsx_amxx_i386.so"), ("libtsfun.so", "tsfun_amxx_i386.so")],
+        files: [
+            ("libtsx.so", "tsx_amxx_i386.so"),
+            ("libtsfun.so", "tsfun_amxx_i386.so"),
+            ("libhamsandwich.so", "hamsandwich_amxx_i386.so"),
+        ],
         strip: "strip",
     },
     Target {
         triple: "i686-pc-windows-gnu",
         platform: "windows-i686",
-        files: [("tsx.dll", "tsx_amxx.dll"), ("tsfun.dll", "tsfun_amxx.dll")],
+        files: [("tsx.dll", "tsx_amxx.dll"), ("tsfun.dll", "tsfun_amxx.dll"), ("hamsandwich.dll", "hamsandwich_amxx.dll")],
         strip: "i686-w64-mingw32-strip",
     },
 ];
@@ -70,7 +74,7 @@ fn cargo() -> Command {
 fn build(release: bool) -> Result<(), String> {
     for t in &TARGETS {
         let mut c = cargo();
-        c.args(["build", "-p", "tsx", "-p", "tsfun", "--target", t.triple]);
+        c.args(["build", "-p", "tsx", "-p", "tsfun", "-p", "hamsandwich", "--target", t.triple]);
         if release {
             c.arg("--release");
         }
@@ -111,10 +115,15 @@ fn dist(debug_info: bool) -> Result<(), String> {
                 run(Command::new(t.strip).arg(&dest))?;
             }
             if t.platform.starts_with("windows") {
-                check_windows_dll(&dest, to.starts_with("tsx"))?;
+                // tsx and hamsandwich are metamod plugins too.
+                check_windows_dll(&dest, !to.starts_with("tsfun"))?;
             }
             eprintln!("  {}", dest.display());
         }
+        // The patched tsxaddon.inc (ts_setuserammo as a native), for recompiling plugins.
+        let inc = root().join("dist").join(t.platform).join("addons/amxmodx/scripting/include");
+        std::fs::create_dir_all(&inc).map_err(|e| e.to_string())?;
+        std::fs::copy(root().join("include/tsxaddon.inc"), inc.join("tsxaddon.inc")).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -186,8 +195,17 @@ fn ensure_line(file: &Path, line: &str) -> Result<(), String> {
     std::fs::write(file, format!("{text}{sep}; tsmod-amxx-rs e2e\n{line}\n")).map_err(|e| e.to_string())
 }
 
-fn compile_plugin(scripting: &Path, out: &Path) -> Result<(), String> {
-    let sma = root().join("e2e/tsx_e2e.sma");
+/// The end-to-end plugins: `e2e/<name>.sma`, each logging to `logs/<name>.log`.
+const PLUGINS: [&str; 2] = ["tsx_e2e", "ham_e2e"];
+
+/// The modules `amxx modules` must list as running.
+const MODULE_NAMES: [&str; 3] = ["TSX", "TSFun Wrapper", "Ham Sandwich"];
+
+/// Native errors the e2e plugins cause on purpose (a hook on an unknown class).
+const EXPECTED_ERRORS: [&str; 1] = ["no_such_class_e2e"];
+
+fn compile_plugin(scripting: &Path, name: &str, out: &Path) -> Result<(), String> {
+    let sma = root().join(format!("e2e/{name}.sma"));
     std::fs::create_dir_all(out.parent().unwrap()).map_err(|e| e.to_string())?;
     let mut c = Command::new(scripting.join("amxxpc"));
     // The repo's include/ first: its tsxaddon.inc declares the ts_setuserammo native.
@@ -200,12 +218,24 @@ fn compile_plugin(scripting: &Path, out: &Path) -> Result<(), String> {
     c.current_dir(out.parent().unwrap());
     let o = c.output().map_err(|e| format!("amxxpc: {e}"))?;
     if !o.status.success() || !out.exists() {
-        return Err(format!("amxxpc failed ({}):\n{}{}", o.status, String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)));
+        return Err(format!(
+            "amxxpc failed on {name} ({}):\n{}{}",
+            o.status,
+            String::from_utf8_lossy(&o.stdout),
+            String::from_utf8_lossy(&o.stderr)
+        ));
     }
     Ok(())
 }
 
-fn install(r: &Root, plugin: &Path) -> Result<(), String> {
+fn plugin_path(name: &str) -> PathBuf {
+    root().join(format!("target/e2e/{name}.amxx"))
+}
+
+/// Installs the modules (hamsandwich under the stock module's file name, replacing it) and the
+/// plugins into a root that `amxx-testenv/setup.sh` built; setup.sh rebuilds roots from scratch,
+/// so this runs before every e2e run.
+fn install(r: &Root) -> Result<(), String> {
     let amxx = r.dir.join("ts/addons/amxmodx");
     if !amxx.join("configs/modules.ini").exists() {
         return Err(format!("{} has no AMX Mod X: run amxx-testenv/setup.sh {}", r.dir.display(), r.os));
@@ -215,13 +245,16 @@ fn install(r: &Root, plugin: &Path) -> Result<(), String> {
         let _ = std::fs::remove_file(&dest); // never write through a hardlink
         std::fs::copy(built(r.target, true, from), &dest).map_err(|e| format!("{from}: {e}"))?;
     }
-    ensure_line(&amxx.join("configs/modules.ini"), "tsx")?;
-    ensure_line(&amxx.join("configs/modules.ini"), "tsfun")?;
-    let dest = amxx.join("plugins/tsx_e2e.amxx");
-    let _ = std::fs::remove_file(&dest);
-    std::fs::copy(plugin, &dest).map_err(|e| e.to_string())?;
-    ensure_line(&amxx.join("configs/plugins.ini"), "tsx_e2e.amxx debug")?;
-    let _ = std::fs::remove_file(amxx.join("logs/tsx_e2e.log"));
+    for m in ["tsx", "tsfun", "hamsandwich"] {
+        ensure_line(&amxx.join("configs/modules.ini"), m)?;
+    }
+    for name in PLUGINS {
+        let dest = amxx.join(format!("plugins/{name}.amxx"));
+        let _ = std::fs::remove_file(&dest);
+        std::fs::copy(plugin_path(name), &dest).map_err(|e| e.to_string())?;
+        ensure_line(&amxx.join("configs/plugins.ini"), &format!("{name}.amxx debug"))?;
+        let _ = std::fs::remove_file(amxx.join(format!("logs/{name}.log")));
+    }
     Ok(())
 }
 
@@ -236,72 +269,80 @@ fn rcon(testenv: &Path, port: u16, cmd: &str) -> String {
 }
 
 /// Runs one root; returns the failures.
-fn e2e_root(r: &Root, testenv: &Path, plugin: &Path) -> Result<Vec<String>, String> {
+fn e2e_root(r: &Root, testenv: &Path) -> Result<Vec<String>, String> {
     if running(r) {
         return Err(format!("a server is already running in {} (amxx-testenv/stop.sh {})", r.dir.display(), r.os));
     }
-    install(r, plugin)?;
+    install(r)?;
     let logs = r.dir.join("ts/addons/amxmodx/logs");
     let started = std::time::SystemTime::now();
     run(Command::new(testenv.join("run.sh")).args([r.os, "--map", "ts_dojo", "--bots", "4"]))?;
     let timeout = Duration::from_secs(std::env::var("E2E_TIMEOUT").ok().and_then(|v| v.parse().ok()).unwrap_or(150));
-    let log = logs.join("tsx_e2e.log");
+    let log_of = |name: &str| logs.join(format!("{name}.log"));
     let t0 = Instant::now();
     let mut modules = String::new();
-    let done = loop {
-        let text = std::fs::read_to_string(&log).unwrap_or_default();
-        if modules.is_empty() && text.contains("start:") {
+    loop {
+        let texts: Vec<String> = PLUGINS.iter().map(|n| std::fs::read_to_string(log_of(n)).unwrap_or_default()).collect();
+        if modules.is_empty() && texts.iter().any(|t| t.contains("start")) {
             modules = rcon(testenv, r.port, "amxx modules");
         }
-        if text.contains("DONE") {
-            break true;
-        }
-        if t0.elapsed() > timeout {
-            break false;
+        if texts.iter().all(|t| t.contains("DONE")) || t0.elapsed() > timeout {
+            break;
         }
         std::thread::sleep(Duration::from_secs(2));
-    };
+    }
     let _ = Command::new(testenv.join("stop.sh")).arg(r.os).status();
 
     let mut fails = Vec::new();
-    let text = std::fs::read_to_string(&log).unwrap_or_default();
-    println!("--- {} ({}) ---", r.os, log.display());
-    for l in text.lines() {
-        // log_to_file lines: `L <date> - <time>: <message>`
-        let msg = l.split_once(": ").map_or(l, |(_, m)| m);
-        println!("  {msg}");
-        if msg.starts_with("CHECK ") && msg.contains(" FAIL") {
-            fails.push(format!("{}: {msg}", r.os));
+    for name in PLUGINS {
+        let log = log_of(name);
+        let text = std::fs::read_to_string(&log).unwrap_or_default();
+        println!("--- {} {name} ({}) ---", r.os, log.display());
+        for l in text.lines() {
+            // log_to_file lines: `L <date> - <time>: <message>`
+            let msg = l.split_once(": ").map_or(l, |(_, m)| m);
+            println!("  {msg}");
+            if msg.starts_with("CHECK ") && msg.contains(" FAIL") {
+                fails.push(format!("{}: {msg}", r.os));
+            }
+        }
+        if !text.contains("DONE") {
+            fails.push(format!(
+                "{}: no DONE in {} within {timeout:?} (did the modules and the plugin load? see {})",
+                r.os,
+                log.display(),
+                logs.display()
+            ));
         }
     }
-    if !done {
-        fails.push(format!(
-            "{}: no DONE in {} within {timeout:?} (did tsx and the plugin load? see {})",
-            r.os,
-            log.display(),
-            logs.display()
-        ));
-    }
-    for l in modules.lines().filter(|l| l.to_lowercase().contains("ts")) {
+    let wanted = |l: &str| MODULE_NAMES.iter().any(|m| l.contains(m));
+    for l in modules.lines().filter(|l| wanted(l)) {
         println!("  amxx modules: {}", l.trim());
     }
-    if !modules.is_empty() && !modules.lines().any(|l| l.contains("TSX") && l.to_lowercase().contains("running")) {
-        fails.push(format!("{}: `amxx modules` doesn't list TSX as running", r.os));
+    if !modules.is_empty() {
+        for m in MODULE_NAMES {
+            if !modules.lines().any(|l| l.contains(m) && l.to_lowercase().contains("running")) {
+                fails.push(format!("{}: `amxx modules` doesn't list {m} as running", r.os));
+            }
+        }
     }
-    // Native errors raised by tsx during this run.
+    // Native errors raised by the modules during this run (except the intended one).
+    let ours = |l: &str| l.contains("[TSX]") || l.contains("[HAMSANDWICH]");
     if let Ok(dir) = std::fs::read_dir(&logs) {
         for e in dir.flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
             let fresh = e.metadata().and_then(|m| m.modified()).is_ok_and(|m| m >= started);
-            if name.starts_with("error_") && fresh {
-                let t = std::fs::read_to_string(e.path()).unwrap_or_default();
-                for l in t.lines().filter(|l| l.contains("[TSX]")) {
+            if !fresh {
+                continue;
+            }
+            let t = std::fs::read_to_string(e.path()).unwrap_or_default();
+            if name.starts_with("error_") {
+                for l in t.lines().filter(|l| ours(l) && !EXPECTED_ERRORS.iter().any(|x| l.contains(x))) {
                     fails.push(format!("{}: {name}: {l}", r.os));
                 }
             }
-            if name.starts_with('L') && name.ends_with(".log") && fresh {
-                let t = std::fs::read_to_string(e.path()).unwrap_or_default();
-                for l in t.lines().filter(|l| l.contains("[TSX]")) {
+            if name.starts_with('L') && name.ends_with(".log") {
+                for l in t.lines().filter(|l| ours(l)) {
                     println!("  amxx log: {}", l.split_once(": ").map_or(l, |(_, m)| m));
                 }
             }
@@ -318,11 +359,12 @@ fn e2e(names: &[String]) -> Result<(), String> {
     }
     let roots = roots(names)?;
     build(true)?;
-    let plugin = root().join("target/e2e/tsx_e2e.amxx");
-    compile_plugin(&scripting, &plugin)?;
+    for name in PLUGINS {
+        compile_plugin(&scripting, name, &plugin_path(name))?;
+    }
     let mut fails = Vec::new();
     for r in &roots {
-        fails.extend(e2e_root(r, &testenv, &plugin)?);
+        fails.extend(e2e_root(r, &testenv)?);
     }
     if fails.is_empty() {
         println!("e2e: all checks passed");

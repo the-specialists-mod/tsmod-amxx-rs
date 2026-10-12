@@ -25,6 +25,9 @@ pub(crate) struct CoreFns {
     pub log_error: PfnLogError,
     pub register_forward: PfnRegisterForward,
     pub execute_forward: PfnExecuteForward,
+    pub register_sp_forward_by_name: PfnRegisterSpForwardByName,
+    pub unregister_sp_forward: PfnUnregisterSpForward,
+    pub prepare_cell_array_a: PfnPrepareCellArrayA,
     pub is_player_ingame: PfnIsPlayerIngame,
     pub amx_exec: PfnAmxExec,
     pub amx_allot: PfnAmxAllot,
@@ -73,6 +76,9 @@ pub(crate) unsafe fn request(req: ReqFnptr, logtag: &'static CStr) -> Result<(),
         log_error: get!(c"LogError", PfnLogError),
         register_forward: get!(c"RegisterForward", PfnRegisterForward),
         execute_forward: get!(c"ExecuteForward", PfnExecuteForward),
+        register_sp_forward_by_name: get!(c"RegisterSPForwardByName", PfnRegisterSpForwardByName),
+        unregister_sp_forward: get!(c"UnregisterSPForward", PfnUnregisterSpForward),
+        prepare_cell_array_a: get!(c"PrepareCellArrayA", PfnPrepareCellArrayA),
         is_player_ingame: get!(c"IsPlayerInGame", PfnIsPlayerIngame),
         amx_exec: get!(c"amx_Exec", PfnAmxExec),
         amx_allot: get!(c"amx_Allot", PfnAmxAllot),
@@ -167,21 +173,98 @@ pub fn register_forward(name: &CStr, cells: usize) -> Option<Forward> {
 /// `MF_ExecuteForward(id, cells...)`. The plugins run inside this call, so callers must not hold
 /// module state they might reach again through a native.
 pub fn execute_forward(fwd: Forward, cells: &[Cell]) -> i32 {
+    let args: Vec<isize> = cells.iter().map(|&c| c as isize).collect();
+    execute_raw(fwd.0, &args)
+}
+
+/// `ExecuteForward` with up to 10 pointer-sized values: cells, string pointers (`FP_STRING`)
+/// and prepared array ids (`FP_ARRAY`). Floats must be passed as cells holding their bits (and
+/// the forward registered with `FP_CELL`): `ExecuteForward` reads `FP_FLOAT` as a double.
+fn execute_raw(id: c_int, a: &[isize]) -> i32 {
     let Some(c) = core() else { return 0 };
-    let (f, id) = (c.execute_forward, fwd.0);
-    // SAFETY: the variadic ExecuteForward with as many cells as the forward was registered with
-    // (the caller's contract mirrors `register_forward`).
+    let f = c.execute_forward;
+    // SAFETY: the variadic ExecuteForward with as many pointer-sized values as the forward has
+    // parameters (the caller's contract); on i686 a cell, a pointer and isize are all 4 bytes.
     unsafe {
-        match *cells {
+        match *a {
             [] => f(id),
-            [a] => f(id, a),
-            [a, b] => f(id, a, b),
-            [a, b, c] => f(id, a, b, c),
-            [a, b, c, d] => f(id, a, b, c, d),
-            [a, b, c, d, e] => f(id, a, b, c, d, e),
-            [a, b, c, d, e, g] => f(id, a, b, c, d, e, g),
+            [a0] => f(id, a0),
+            [a0, a1] => f(id, a0, a1),
+            [a0, a1, a2] => f(id, a0, a1, a2),
+            [a0, a1, a2, a3] => f(id, a0, a1, a2, a3),
+            [a0, a1, a2, a3, a4] => f(id, a0, a1, a2, a3, a4),
+            [a0, a1, a2, a3, a4, a5] => f(id, a0, a1, a2, a3, a4, a5),
+            [a0, a1, a2, a3, a4, a5, a6] => f(id, a0, a1, a2, a3, a4, a5, a6),
+            [a0, a1, a2, a3, a4, a5, a6, a7] => f(id, a0, a1, a2, a3, a4, a5, a6, a7),
+            [a0, a1, a2, a3, a4, a5, a6, a7, a8] => f(id, a0, a1, a2, a3, a4, a5, a6, a7, a8),
+            [a0, a1, a2, a3, a4, a5, a6, a7, a8, a9] => f(id, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9),
             _ => 0,
         }
+    }
+}
+
+/// A value for [`execute_sp_forward`].
+pub enum FwdValue<'a> {
+    Cell(Cell),
+    Str(&'a CStr),
+    /// Copied into the plugin for the call (`MF_PrepareCellArrayA(.., false)`).
+    Array(&'a mut [Cell]),
+}
+
+/// `MF_ExecuteForward` of a single-plugin forward with mixed values; returns what the public
+/// returned.
+pub fn execute_sp_forward(id: i32, values: &mut [FwdValue]) -> i32 {
+    let Some(c) = core() else { return 0 };
+    let mut args = Vec::with_capacity(values.len());
+    for v in values.iter_mut() {
+        args.push(match v {
+            FwdValue::Cell(x) => *x as isize,
+            FwdValue::Str(s) => s.as_ptr() as isize,
+            FwdValue::Array(arr) => {
+                // SAFETY: the array outlives the ExecuteForward below, where the core copies it.
+                let id = unsafe { (c.prepare_cell_array_a)(arr.as_mut_ptr(), arr.len() as core::ffi::c_uint, false) };
+                id as isize
+            }
+        });
+    }
+    execute_raw(id, &args)
+}
+
+/// `MF_RegisterSPForwardByName(amx, name, types..., FP_DONE)`: a forward to one plugin's public,
+/// -1 if it has none by that name.
+///
+/// # Safety
+/// `amx` is a plugin's AMX the core handed to a native (`Args::amx`).
+pub unsafe fn register_sp_forward(amx: usize, name: &str, types: &[core::ffi::c_int]) -> i32 {
+    let Some(c) = core() else { return -1 };
+    let n = c_string(name);
+    let (f, amx, n) = (c.register_sp_forward_by_name, amx as *mut Amx, n.as_ptr());
+    const D: core::ffi::c_int = FP_DONE;
+    // SAFETY: the variadic RegisterSPForwardByName with the parameter types terminated by
+    // FP_DONE; `amx` per the caller's contract.
+    unsafe {
+        match *types {
+            [] => f(amx, n, D),
+            [a] => f(amx, n, a, D),
+            [a, b] => f(amx, n, a, b, D),
+            [a, b, c2] => f(amx, n, a, b, c2, D),
+            [a, b, c2, d] => f(amx, n, a, b, c2, d, D),
+            [a, b, c2, d, e] => f(amx, n, a, b, c2, d, e, D),
+            [a, b, c2, d, e, g] => f(amx, n, a, b, c2, d, e, g, D),
+            [a, b, c2, d, e, g, h] => f(amx, n, a, b, c2, d, e, g, h, D),
+            [a, b, c2, d, e, g, h, i] => f(amx, n, a, b, c2, d, e, g, h, i, D),
+            [a, b, c2, d, e, g, h, i, j] => f(amx, n, a, b, c2, d, e, g, h, i, j, D),
+            [a, b, c2, d, e, g, h, i, j, k] => f(amx, n, a, b, c2, d, e, g, h, i, j, k, D),
+            _ => -1,
+        }
+    }
+}
+
+/// `MF_UnregisterSPForward(id)`.
+pub fn unregister_sp_forward(id: i32) {
+    if let Some(c) = core() {
+        // SAFETY: a plain core function taking a forward id.
+        unsafe { (c.unregister_sp_forward)(id) }
     }
 }
 

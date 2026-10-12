@@ -34,6 +34,10 @@ pub trait Args {
     }
     /// `MF_LogError(amx, AMX_ERR_NATIVE, ...)`.
     fn error(&mut self, msg: &str);
+    /// The calling plugin's AMX, as an opaque handle (for per-plugin forwards); 0 in fakes.
+    fn amx(&self) -> usize {
+        0
+    }
 }
 
 /// The real arguments: the core's AMX and `params`.
@@ -97,6 +101,10 @@ impl Args for AmxArgs<'_> {
     fn error(&mut self, msg: &str) {
         // SAFETY: the AMX of the running native.
         unsafe { crate::core::log_error(self.amx, msg) }
+    }
+
+    fn amx(&self) -> usize {
+        self.amx as usize
     }
 }
 

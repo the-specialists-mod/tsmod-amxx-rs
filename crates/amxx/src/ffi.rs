@@ -32,6 +32,8 @@ pub const AMX_ERR_NATIVE: c_int = 10;
 pub const ET_IGNORE: c_int = 0;
 pub const FP_DONE: c_int = -1;
 pub const FP_CELL: c_int = 0;
+pub const FP_STRING: c_int = 2;
+pub const FP_ARRAY: c_int = 4;
 
 /// `amxx_module_info_s`.
 #[repr(C)]
@@ -107,6 +109,9 @@ pub type PfnLog = unsafe extern "C" fn(fmt: *const c_char, ...);
 pub type PfnLogError = unsafe extern "C" fn(amx: *mut Amx, err: c_int, fmt: *const c_char, ...);
 pub type PfnRegisterForward = unsafe extern "C" fn(name: *const c_char, exec: c_int, ...) -> c_int;
 pub type PfnExecuteForward = unsafe extern "C" fn(id: c_int, ...) -> c_int;
+pub type PfnRegisterSpForwardByName = unsafe extern "C" fn(amx: *mut Amx, name: *const c_char, ...) -> c_int;
+pub type PfnUnregisterSpForward = unsafe extern "C" fn(id: c_int);
+pub type PfnPrepareCellArrayA = unsafe extern "C" fn(ptr: *mut Cell, size: core::ffi::c_uint, copyback: bool) -> Cell;
 pub type PfnIsPlayerIngame = unsafe extern "C" fn(id: c_int) -> c_int;
 pub type PfnAmxExec = unsafe extern "C" fn(amx: *mut Amx, ret: *mut Cell, index: c_int) -> c_int;
 pub type PfnAmxAllot = unsafe extern "C" fn(amx: *mut Amx, len: c_int, amx_addr: *mut Cell, phys: *mut *mut Cell) -> c_int;

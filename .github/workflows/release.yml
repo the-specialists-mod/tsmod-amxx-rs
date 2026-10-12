@@ -1,6 +1,6 @@
-# Builds the modules for i686 Linux and Windows and publishes a GitHub release when a `v*` tag
-# is pushed: tsmod-amxx-rs-<tag>-<platform>.zip, each holding addons/amxmodx/modules/ to copy
-# over a server's ts/addons/. A manual run (workflow_dispatch) builds the archives as a workflow
+# Builds the modules (tsx, tsfun, hamsandwich) for i686 Linux and Windows and publishes a GitHub
+# release when a `v*` tag is pushed: tsmod-amxx-rs-<tag>-<platform>.zip, each holding
+# addons/amxmodx/modules/ (and scripting/include/tsxaddon.inc) to copy over a server's ts/addons/. A manual run (workflow_dispatch) builds the archives as a workflow
 # artifact without publishing a release.
 name: release
 
@@ -46,7 +46,8 @@ jobs:
         run: cargo xtask lint
 
       # dist strips the libraries, fails if a DLL imports a MinGW runtime DLL (the server loads
-      # them with only system DLLs around) or tsx lacks the undecorated GiveFnptrsToDll.
+      # them with only system DLLs around) or a metamod module (tsx, hamsandwich) lacks the
+      # undecorated GiveFnptrsToDll.
       - name: Package
         run: |
           set -euo pipefail

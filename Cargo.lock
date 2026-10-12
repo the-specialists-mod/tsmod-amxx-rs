@@ -94,6 +94,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hamsandwich"
+version = "0.1.0"
+dependencies = [
+ "amxx",
+ "goldsrc-sys",
+ "ts-plugin-api",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.190"
 source = "registry+https://github.com/rust-lang/crates.io-index"
