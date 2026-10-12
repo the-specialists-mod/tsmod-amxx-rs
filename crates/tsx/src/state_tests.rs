@@ -303,3 +303,15 @@ fn api_refreshes_the_weapon_in_hand_for_bots() {
     s.pre_think(&g, 1);
     assert_eq!((s.players[1].current, s.players[1].weapons[18].clip), (18, 4));
 }
+
+#[test]
+fn bots_without_the_api_hold_what_their_model_shows() {
+    let (mut s, g) = setup();
+    g.edit(2, |e| {
+        e.bot = true;
+        e.weapon_model = "models/p_m4_sil.mdl".into();
+    });
+    s.pre_think(&g, 2);
+    s.pre_think(&g, 1);
+    assert_eq!((s.players[2].current, s.players[1].current), (5, 0), "humans keep WeaponInfo's");
+}

@@ -143,9 +143,12 @@ fn setters_call_the_api() {
     assert_eq!(base::set_user_message(&g, &mut bad), 0);
     assert_eq!(bad.errors, ["Invalid message id: 17"]);
     g.api.as_ref().unwrap().result.set(ts_plugin_api::INVALID);
-    let mut inv = FakeArgs::new(&[2, -5]);
-    assert_eq!(base::set_user_slots(&g, &mut inv), 0);
-    assert_eq!(inv.errors, ["ts_setuserslots: argument out of range"]);
+    for _ in 0..2 {
+        let mut inv = FakeArgs::new(&[2, -5]);
+        assert_eq!(base::set_user_slots(&g, &mut inv), 0);
+        assert!(inv.errors.is_empty(), "upstream raised no error here");
+    }
+    assert_eq!(*g.logs.borrow(), ["ts_setuserslots: the server rejected a value as out of range (logged once)"]);
 }
 
 #[test]

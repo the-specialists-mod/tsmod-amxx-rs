@@ -145,7 +145,7 @@ pub fn get_user_slots(g: &dyn Game, a: &mut dyn Args) -> Cell {
 pub fn set_user_slots(g: &dyn Game, a: &mut dyn Args) -> Cell {
     let Some(id) = user(g, a) else { return 0 };
     let v = a.cell(2);
-    api_call(g, a, "ts_setuserslots", |api| api.set_free_slots(id as i32, v))
+    api_call(g, "ts_setuserslots", |api| api.set_free_slots(id as i32, v))
 }
 
 /// `ts_getuserstate(index)`: the stance `TSState` carries.
@@ -175,28 +175,28 @@ pub fn set_user_message(g: &dyn Game, a: &mut dyn Args) -> Cell {
         return 0;
     }
     let award = if m == TSMSG_NORMAL { 0 } else { m };
-    api_call(g, a, "ts_set_message", |api| api.set_award(id as i32, award))
+    api_call(g, "ts_set_message", |api| api.set_award(id as i32, award))
 }
 
 /// `ts_set_bullettrail(id, yesorno)`.
 pub fn set_bullettrail(g: &dyn Game, a: &mut dyn Args) -> Cell {
     let Some(id) = user(g, a) else { return 0 };
     let on = a.cell(2) != 0;
-    api_call(g, a, "ts_set_bullettrail", |api| api.set_bullet_trail(id as i32, on))
+    api_call(g, "ts_set_bullettrail", |api| api.set_bullet_trail(id as i32, on))
 }
 
 /// `ts_set_fakeslowmo(id, Float:time)`: slow motion now, without using up a held power-up.
 pub fn set_fake_slowmo(g: &dyn Game, a: &mut dyn Args) -> Cell {
     let Some(id) = user(g, a) else { return 0 };
     let t = a.float(2);
-    api_call(g, a, "ts_set_fakeslowmo", |api| api.run_powerup(id as i32, powerup::SLOWMO, t))
+    api_call(g, "ts_set_fakeslowmo", |api| api.run_powerup(id as i32, powerup::SLOWMO, t))
 }
 
 /// `ts_set_fakeslowpause(id, Float:time)`.
 pub fn set_fake_slowpause(g: &dyn Game, a: &mut dyn Args) -> Cell {
     let Some(id) = user(g, a) else { return 0 };
     let t = a.float(2);
-    api_call(g, a, "ts_set_fakeslowpause", |api| api.run_powerup(id as i32, powerup::SLOWPAUSE, t))
+    api_call(g, "ts_set_fakeslowpause", |api| api.run_powerup(id as i32, powerup::SLOWPAUSE, t))
 }
 
 /// `ts_is_in_slowmo(id)`: when the player is slowed, the time their power-up ends (a float in
@@ -213,14 +213,14 @@ pub fn is_in_slowmo(g: &dyn Game, a: &mut dyn Args) -> Cell {
 pub fn set_speed(g: &dyn Game, a: &mut dyn Args) -> Cell {
     let Some(id) = user(g, a) else { return 0 };
     let (speed, aura, time) = (a.float(2), a.float(3), a.float(4));
-    api_call(g, a, "ts_set_speed", |api| api.set_speed(id as i32, speed, aura, time))
+    api_call(g, "ts_set_speed", |api| api.set_speed(id as i32, speed, aura, time))
 }
 
 /// `ts_set_physics_speed(id, Float:speed)`.
 pub fn set_physics_speed(g: &dyn Game, a: &mut dyn Args) -> Cell {
     let Some(id) = user(g, a) else { return 0 };
     let speed = a.float(2);
-    api_call(g, a, "ts_set_physics_speed", |api| api.set_physics_speed(id as i32, speed))
+    api_call(g, "ts_set_physics_speed", |api| api.set_physics_speed(id as i32, speed))
 }
 
 /// `ts_is_running_powerup(id)`: the running power-up's bits, 0 for none.
@@ -233,7 +233,7 @@ pub fn is_running_powerup(g: &dyn Game, a: &mut dyn Args) -> Cell {
 pub fn force_powerup_run(g: &dyn Game, a: &mut dyn Args) -> Cell {
     let Some(id) = user(g, a) else { return 0 };
     let bits = a.cell(2);
-    api_call(g, a, "ts_force_run_powerup", |api| api.run_powerup(id as i32, bits, -1.0))
+    api_call(g, "ts_force_run_powerup", |api| api.run_powerup(id as i32, bits, -1.0))
 }
 
 /// `ts_has_superjump(id)`.
@@ -257,7 +257,7 @@ pub fn set_user_cash(g: &dyn Game, a: &mut dyn Args) -> Cell {
     let Some(id) = super::player(g, a, "Player {} is not valid") else { return 0 };
     if ingame(id) {
         let v = a.cell(2);
-        if api_call(g, a, "ts_setusercash", |api| api.set_cash(id as i32, v)) == 1 {
+        if api_call(g, "ts_setusercash", |api| api.set_cash(id as i32, v)) == 1 {
             with(|s| s.players[id].money = v);
         }
     }

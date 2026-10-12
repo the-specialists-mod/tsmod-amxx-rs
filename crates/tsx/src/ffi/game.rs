@@ -170,6 +170,9 @@ impl Game for RealGame {
     fn netname(&self, ent: i32) -> String {
         self.ent(ent).netname()
     }
+    fn weapon_model(&self, ent: i32) -> String {
+        self.ent(ent).weapon_model()
+    }
     fn cvar(&self, name: &str) -> f32 {
         let n = CString::new(name).unwrap_or_default();
         engine().map_or(0.0, |e| e.cvar_float(&n))

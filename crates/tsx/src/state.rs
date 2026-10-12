@@ -31,8 +31,8 @@ pub struct State {
     pub knife_offset: i32,
     /// Indices of the weapon-firing events (`events/fire.sc`, `events/firelinked.sc`).
     pub fire_events: Vec<u16>,
-    /// Natives that already logged that the server has no plugin API.
-    pub api_warned: Vec<&'static str>,
+    /// Natives that already logged an API problem (no API, a rejected value).
+    pub api_warned: Vec<String>,
 }
 
 impl Default for State {
@@ -184,20 +184,28 @@ impl State {
         }
     }
 
-    /// `PlayerPreThink_Post`: a spawn's delayed stats commit. With the plugin API, also takes
-    /// the weapon in hand from the server, which keeps it right for bots (the server sends bots
-    /// no `WeaponInfo`).
+    /// `PlayerPreThink_Post`: a spawn's delayed stats commit. Also refreshes the weapon in hand
+    /// from the plugin API, or for bots without it from their player model (the server sends
+    /// bots no `WeaponInfo`).
     pub fn pre_think(&mut self, g: &dyn Game, ent: i32) {
         let Some(i) = slot(self, ent) else { return };
         self.players[i].checkstate = false;
-        if let Some(info) = g.api().and_then(|a| a.player_info(ent).ok()) {
-            let p = &mut self.players[i];
-            let w = if info.weapon == 0 { KUNG_FU } else { info.weapon as usize };
-            if w < MAX_WEAPONS {
-                p.current = w;
-                let pw = &mut p.weapons[w];
-                (pw.clip, pw.ammo, pw.mode, pw.attach) = (info.clip, info.ammo, info.fire_mode, info.attachments);
+        if let Some(api) = g.api() {
+            if let Ok(info) = api.player_info(ent) {
+                let p = &mut self.players[i];
+                let w = if info.weapon == 0 { KUNG_FU } else { info.weapon as usize };
+                if w < MAX_WEAPONS {
+                    p.current = w;
+                    let pw = &mut p.weapons[w];
+                    (pw.clip, pw.ammo, pw.mode, pw.attach) = (info.clip, info.ammo, info.fire_mode, info.attachments);
+                }
             }
+        } else if g.is_fake_client(ent)
+            && g.is_alive(ent)
+            && let Some(w) = crate::weapons::id_from_p_model(&g.weapon_model(ent))
+        {
+            // Port addition: bots get no `WeaponInfo`; their model shows what they hold.
+            self.players[i].current = w;
         }
         if !active(g) {
             return;

@@ -25,6 +25,7 @@ pub struct Ent {
     pub owner: Option<i32>,
     pub name: String,
     pub auth: Option<String>,
+    pub weapon_model: String,
 }
 
 #[derive(Default)]
@@ -161,6 +162,9 @@ impl Game for FakeGame {
     }
     fn netname(&self, e: i32) -> String {
         self.get(e, |x| x.name.clone())
+    }
+    fn weapon_model(&self, e: i32) -> String {
+        self.get(e, |x| x.weapon_model.clone())
     }
     fn cvar(&self, name: &str) -> f32 {
         self.cvars.borrow().get(name).copied().unwrap_or(0.0)

@@ -42,27 +42,35 @@ fn info(g: &dyn Game, id: usize) -> Option<PlayerInfo> {
     g.api()?.player_info(id as i32).ok()
 }
 
-/// Calls an API setter: 1 when it was applied (or queued), 0 otherwise. Without the API the
-/// native logs that once per map and fails softly; an out-of-range argument is a native error
-/// (upstream had none, as it wrote whatever it got).
-fn api_call(g: &dyn Game, a: &mut dyn Args, native: &'static str, f: impl FnOnce(&dyn TsApi) -> Result<(), i32>) -> Cell {
-    let Some(api) = g.api() else {
-        let first = with(|s| {
-            let first = !s.api_warned.contains(&native);
-            if first {
-                s.api_warned.push(native);
-            }
-            first
-        });
-        if first.unwrap_or(false) {
-            g.log(&format!("{native}: this server has no TS plugin API (needs a Rust TS server with ts-plugin-api), so it does nothing"));
+/// Logs `msg` the first time `key` comes up (per server run), so a plugin calling a native every
+/// frame doesn't flood the log.
+fn log_once(g: &dyn Game, key: &str, msg: impl FnOnce() -> String) {
+    let first = with(|s| {
+        let first = !s.api_warned.iter().any(|k| k == key);
+        if first {
+            s.api_warned.push(key.to_owned());
         }
+        first
+    });
+    if first.unwrap_or(false) {
+        g.log(&msg());
+    }
+}
+
+/// Calls an API setter: 1 when it was applied (or queued), 0 otherwise. Upstream raised no
+/// native errors here (it wrote whatever it got into `CBasePlayer`), so failures only log, once
+/// per native: no API on this server, or a value the server rejects (`INVALID`).
+fn api_call(g: &dyn Game, native: &str, f: impl FnOnce(&dyn TsApi) -> Result<(), i32>) -> Cell {
+    let Some(api) = g.api() else {
+        log_once(g, native, || {
+            format!("{native}: this server has no TS plugin API (needs a Rust TS server with ts-plugin-api), so it does nothing")
+        });
         return 0;
     };
     match f(api) {
         Ok(()) => 1,
         Err(ts_plugin_api::INVALID) => {
-            a.error(&format!("{native}: argument out of range"));
+            log_once(g, &format!("{native}:invalid"), || format!("{native}: the server rejected a value as out of range (logged once)"));
             0
         }
         Err(_) => 0,

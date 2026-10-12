@@ -96,6 +96,59 @@ const LOG_ALIASES: [(&str, usize); 10] = [
     ("mossberg_500", 26),
 ];
 
+/// TS 3.0's player-model names (`models/p_<name>.mdl`, `_sil` when silenced) by wire id, from
+/// the port's `crates/shared/data/assets.toml`.
+const P_MODELS: [(&str, usize); 36] = [
+    ("glock18", 1),
+    ("beretta", 2),
+    ("uzi", 3),
+    ("m3", 4),
+    ("m4", 5),
+    ("mp5sd", 6),
+    ("mp5k", 7),
+    ("berettas", 8),
+    ("mk23", 9),
+    ("mk23_akimbo", 10),
+    ("usas", 11),
+    ("desert", 12),
+    ("ak47", 13),
+    ("fnh", 14),
+    ("aug", 15),
+    ("uzi_akimbo", 16),
+    ("skorpion", 17),
+    ("m82", 18),
+    ("pdw", 19),
+    ("spas12", 20),
+    ("gold", 21),
+    ("glock22", 22),
+    ("ump", 23),
+    ("m61", 24),
+    ("knife", 25),
+    ("mossberg", 26),
+    ("m16", 27),
+    ("ruger", 28),
+    ("fnh_akimbo", 30),
+    ("bull", 31),
+    ("m60", 32),
+    ("sawedoff", 33),
+    ("katana", 34),
+    ("sealknife", 35),
+    ("contender", 36),
+    ("skorpion_ak", 37),
+];
+
+/// The weapon a player holds, from `pev->weaponmodel`: the server sends bots no `WeaponInfo`,
+/// so without the plugin API this is how tsx learns a bot's weapon. No model is kung fu.
+pub fn id_from_p_model(path: &str) -> Option<usize> {
+    if path.is_empty() {
+        return Some(KUNG_FU);
+    }
+    let file = path.rsplit(['/', '\\']).next()?.to_ascii_lowercase();
+    let name = file.strip_prefix("p_")?.strip_suffix(".mdl")?;
+    let base = name.strip_suffix("_sil").unwrap_or(name);
+    P_MODELS.iter().find(|(m, _)| *m == base).map(|&(_, id)| id)
+}
+
 /// The table, including the custom slots.
 #[derive(Clone, Debug)]
 pub struct Weapons(Vec<Weapon>);
@@ -207,6 +260,16 @@ mod tests {
         assert_eq!(w.by_logname("throwing_katana"), Some(37));
         assert_eq!(w.by_logname("nope"), None);
         assert_eq!(w.by_logname(""), None, "empty custom slots don't match an empty name");
+    }
+
+    #[test]
+    fn player_models_name_the_weapon() {
+        assert_eq!(id_from_p_model("models/p_ak47.mdl"), Some(13));
+        assert_eq!(id_from_p_model("models/p_glock18_sil.mdl"), Some(1));
+        assert_eq!(id_from_p_model("models/p_uzi_akimbo_sil.mdl"), Some(16));
+        assert_eq!(id_from_p_model("models/p_PDW_sil.mdl"), Some(19), "the shipped spelling of the MP7's silenced model");
+        assert_eq!(id_from_p_model(""), Some(KUNG_FU));
+        assert_eq!(id_from_p_model("models/v_ak47.mdl"), None);
     }
 
     #[test]

@@ -65,6 +65,8 @@ pub trait Game {
     fn auth_id(&self, ent: i32) -> Option<String>;
     /// `STRING(pev->netname)`.
     fn netname(&self, ent: i32) -> String;
+    /// `STRING(pev->weaponmodel)`.
+    fn weapon_model(&self, ent: i32) -> String;
     /// `CVAR_GET_FLOAT`.
     fn cvar(&self, name: &str) -> f32;
     /// `CVAR_SET_FLOAT`.

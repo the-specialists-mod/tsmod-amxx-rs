@@ -268,6 +268,8 @@ impl Edict {
         classname_id: goldsrc_sys::string_t = classname);
     field!(/// `pev->netname`.
         netname_id: goldsrc_sys::string_t = netname);
+    field!(/// `pev->weaponmodel`.
+        weapon_model_id: goldsrc_sys::string_t = weaponmodel);
 
     /// `pev->dmg_inflictor`.
     pub fn dmg_inflictor(self) -> Edict {
@@ -303,6 +305,11 @@ impl Edict {
     /// `STRING(pev->netname)`.
     pub fn netname(self) -> String {
         engine().map(|e| e.string(self.netname_id())).unwrap_or_default()
+    }
+
+    /// `STRING(pev->weaponmodel)`.
+    pub fn weapon_model(self) -> String {
+        engine().map(|e| e.string(self.weapon_model_id())).unwrap_or_default()
     }
 
     /// The edict at `index` in the array starting at `self` (`pEdictList + i` in `ServerActivate`).
