@@ -80,7 +80,7 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 [[package]]
 name = "goldsrc"
 version = "3.0.1"
-source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5#15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5"
+source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?rev=5a8ec9465ae0c6f79e3b270b75549ce4f2a545ad#5a8ec9465ae0c6f79e3b270b75549ce4f2a545ad"
 dependencies = [
  "goldsrc-sys",
 ]
@@ -88,7 +88,7 @@ dependencies = [
 [[package]]
 name = "goldsrc-sys"
 version = "3.0.1"
-source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5#15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5"
+source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?rev=5a8ec9465ae0c6f79e3b270b75549ce4f2a545ad#5a8ec9465ae0c6f79e3b270b75549ce4f2a545ad"
 dependencies = [
  "bindgen",
 ]
@@ -251,7 +251,7 @@ dependencies = [
 [[package]]
 name = "shared"
 version = "3.0.1"
-source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5#15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5"
+source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?rev=5a8ec9465ae0c6f79e3b270b75549ce4f2a545ad#5a8ec9465ae0c6f79e3b270b75549ce4f2a545ad"
 dependencies = [
  "goldsrc",
  "goldsrc-sys",
@@ -311,12 +311,12 @@ dependencies = [
 [[package]]
 name = "ts-gameplay"
 version = "3.0.1"
-source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5#15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5"
+source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?rev=5a8ec9465ae0c6f79e3b270b75549ce4f2a545ad#5a8ec9465ae0c6f79e3b270b75549ce4f2a545ad"
 
 [[package]]
 name = "ts-plugin-api"
 version = "3.0.1"
-source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5#15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5"
+source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?rev=5a8ec9465ae0c6f79e3b270b75549ce4f2a545ad#5a8ec9465ae0c6f79e3b270b75549ce4f2a545ad"
 
 [[package]]
 name = "tsfun"

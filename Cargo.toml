@@ -8,14 +8,13 @@ version = "0.1.0"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/the-specialists-mod/tsmod-amxx-rs"
 
-# The port's crates, pinned to the commit with version 3 of the plugin API (`ts-plugin-api`,
-# the-specialistsmod-rs#104). Until that is merged and pushed this points at the local checkout's
-# branch `bots/plugin-loader`; after the merge, put the GitHub URL back with the merged rev.
+# The port's crates, pinned to the main commit with version 3 of the plugin API (`ts-plugin-api`,
+# the-specialistsmod-rs#104: the tsmod_* loader, bot backends) and its server implementation.
 [workspace.dependencies]
-goldsrc-sys = { git = "file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists", rev = "15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5" }
-ts-plugin-api = { git = "file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists", rev = "15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5" }
+goldsrc-sys = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", rev = "5a8ec9465ae0c6f79e3b270b75549ce4f2a545ad" }
+ts-plugin-api = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", rev = "5a8ec9465ae0c6f79e3b270b75549ce4f2a545ad" }
 # Tests only: the port's message encoders, so the parsers are checked against the real wire code.
-shared = { git = "file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists", rev = "15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5" }
+shared = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", rev = "5a8ec9465ae0c6f79e3b270b75549ce4f2a545ad" }
 
 [profile.dev]
 panic = "abort" # unwinding across the C ABI is UB; be explicit
