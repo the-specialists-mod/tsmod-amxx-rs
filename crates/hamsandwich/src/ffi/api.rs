@@ -16,10 +16,10 @@ use ts_plugin_api::{HamArg, HamCall, PluginApi, ham};
 
 static API: AtomicPtr<PluginApi> = AtomicPtr::new(core::ptr::null_mut());
 
-/// The table, once found (version 2, full size).
+/// The table, once found.
 pub fn table() -> Option<&'static PluginApi> {
-    // SAFETY: NULL or the server's static table, checked by `find` to have every version-2
-    // field; it lives as long as the game library.
+    // SAFETY: NULL or the server's static table, checked by `find` (its version and size); it
+    // lives as long as the game library.
     if let Some(t) = unsafe { API.load(Ordering::Relaxed).as_ref() } {
         return Some(t);
     }
@@ -27,13 +27,13 @@ pub fn table() -> Option<&'static PluginApi> {
     find().ok()
 }
 
-/// Finds the version-2 table and installs the hook.
+/// Finds the table and installs the hook.
 pub fn find() -> Result<&'static PluginApi, String> {
     // SAFETY: as in `table`.
     if let Some(t) = unsafe { API.load(Ordering::Relaxed).as_ref() } {
         return Ok(t);
     }
-    let t = amxx::tsapi::find(amxx::tsapi::V2_SIZE, 2)?;
+    let t = amxx::tsapi::find()?;
     API.store(t as *const PluginApi as *mut PluginApi, Ordering::Relaxed);
     t.ham_set_hook_on();
     Ok(t)
@@ -161,6 +161,12 @@ fn set_ret(call: &mut HamCall, t: Ty, v: &Val) {
 
 /// [`HamApi`] over the table.
 pub struct RealHamApi(pub &'static PluginApi);
+// SAFETY: the server's table is static for the life of the game library and only read; since
+// version 3 it also holds the engine's table and globals pointers, which this module never uses.
+// Everything runs on the engine's thread.
+unsafe impl Sync for RealHamApi {}
+// SAFETY: as above.
+unsafe impl Send for RealHamApi {}
 
 impl HamApi for RealHamApi {
     fn set_hook(&self, on: bool) {

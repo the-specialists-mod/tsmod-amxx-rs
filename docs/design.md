@@ -56,13 +56,15 @@ Hooks (as upstream): pre `ClientDisconnect`, `ServerDeactivate`; post `ClientCon
 The Rust server exports tier1's `CreateInterface`. tsx asks metamod for the game library's path
 (`GET_GAME_INFO(PLID, GINFO_REALDLL_FULLPATH)`), finds the export in the already loaded library
 (`dlopen(RTLD_NOLOAD)` + `dlsym` on Linux; `GetModuleHandleA` + `GetProcAddress` on Windows,
-retrying with the bare file name) and calls it with `TSRS_PluginApi001`. A table whose `size` is
-smaller than tsx's `PluginApi` (version 1) is refused. The lookup runs at `AMXX_PluginsLoaded`
+retrying with the bare file name) and calls it with `TSRS_PluginApi003` (version 3,
+the-specialistsmod-rs#104). The name carries the version and versions aren't compatible, so a
+server with another version answers NULL; a table whose `version` isn't 3 or whose `size` is
+smaller than this build's `PluginApi` is refused too (`amxx::tsapi::find`). The lookup runs at `AMXX_PluginsLoaded`
 and again at each `ServerActivate` until it succeeds; a server without the API gets one warning
 in the AMX Mod X log.
 
-tsx needs only the version-1 part of the table (`amxx::tsapi::V1_SIZE`), so it runs on any
-server with the API; hamsandwich needs version 2 (section 8).
+tsx and hamsandwich both need version 3; the modules use none of version 3's additions (bots,
+entity info, host services) yet, only what version 2 had, unchanged in meaning (section 8).
 
 Contract (`ts-plugin-api` docs and the port's `docs/implementation/plugin-api.md`): entity
 indices, engine thread only; `player_info` returns a snapshot refreshed each frame, so a getter
@@ -174,7 +176,7 @@ Stock hamsandwich creates an entity of the class, finds its C++ vtable through t
 forwards around the original. The Rust server's entities have no vtables (an edict's private
 data is a zeroed block with a slab handle), so stock reads garbage (Linux) or crashes (Windows).
 
-The port's plugin API version 2 offers entity hooks instead: one hook function per plugin
+The port's plugin API (version 2 on, now 3) offers entity hooks instead: one hook function per plugin
 (`ham_set_hook`), functions turned on by number (`ham_watch`, `Ham` enum numbers), classes by
 id (`class_id`, `entity_class_id`), `ham_supported`, and `ham_execute`. The server calls the hook
 before (`post` 0) and after (`post` 1) each watched function with a `HamCall`; arguments are
@@ -225,7 +227,7 @@ that a call in progress passed, so a bad handle is a native error instead of a c
 **pdata natives**: `get_pdata_cbase(_safe)` and `set_pdata_cbase` keep stock's checks but never
 touch the private data: -1 (null) and a no-op.
 
-**Without API version 2** the module loads, logs one warning and registers its natives;
+**Without API version 3** the module loads, logs one warning and registers its natives;
 `IsHamValid` is 0 and `RegisterHam`/`ExecuteHam` fail through `__fatal_ham_error` as stock does
 for functions missing from its gamedata.
 

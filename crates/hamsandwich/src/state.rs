@@ -10,7 +10,7 @@
 //! `result`), the function unless `result` reached `HAM_SUPERCEDE`, post forwards, then returns
 //! the plugins' value when the *last* forward that ran said `HAM_OVERRIDE` or more
 //! (`thisresult`), else the function's. Here the server calls [`pre`] and [`post`] around its own
-//! function (`ts-plugin-api` version 2); the state lives in a [`Frame`] per call, on a stack, so
+//! function (`ts-plugin-api`'s entity hooks, version 3); the state lives in a [`Frame`] per call, on a stack, so
 //! nested calls (a forward dealing damage, `ExecuteHamB`) work as in stock. The server calls
 //! post exactly when it called pre, innermost first, so post belongs to the top frame.
 //!

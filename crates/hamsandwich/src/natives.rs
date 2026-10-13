@@ -60,7 +60,7 @@ fn check_function(host: &dyn Host, a: &mut dyn Args, func: Cell) -> Option<usize
     if !available(host, func as usize) {
         if host.api().is_none() {
             log_once(host, "noapi", || {
-                "this server has no TS plugin API version 2 (entity hooks): hamsandwich can't hook or call anything".into()
+                "this server has no TS plugin API version 3 (entity hooks): hamsandwich can't hook or call anything".into()
             });
         }
         return fail(error::FUNC_NOT_CONFIGURED, format!("Function {} is not configured in gamedata.", e.name));

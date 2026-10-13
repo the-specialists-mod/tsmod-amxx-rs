@@ -79,16 +79,16 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "goldsrc"
-version = "3.0.0"
-source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?rev=14999e6d50c4f830d30c1d5668dfa015e329e5ce#14999e6d50c4f830d30c1d5668dfa015e329e5ce"
+version = "3.0.1"
+source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5#15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5"
 dependencies = [
  "goldsrc-sys",
 ]
 
 [[package]]
 name = "goldsrc-sys"
-version = "3.0.0"
-source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?rev=14999e6d50c4f830d30c1d5668dfa015e329e5ce#14999e6d50c4f830d30c1d5668dfa015e329e5ce"
+version = "3.0.1"
+source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5#15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5"
 dependencies = [
  "bindgen",
 ]
@@ -250,13 +250,14 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "3.0.0"
-source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?rev=14999e6d50c4f830d30c1d5668dfa015e329e5ce#14999e6d50c4f830d30c1d5668dfa015e329e5ce"
+version = "3.0.1"
+source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5#15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5"
 dependencies = [
  "goldsrc",
  "goldsrc-sys",
  "serde",
  "toml",
+ "ts-gameplay",
 ]
 
 [[package]]
@@ -308,9 +309,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ts-gameplay"
+version = "3.0.1"
+source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5#15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5"
+
+[[package]]
 name = "ts-plugin-api"
-version = "3.0.0"
-source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?rev=14999e6d50c4f830d30c1d5668dfa015e329e5ce#14999e6d50c4f830d30c1d5668dfa015e329e5ce"
+version = "3.0.1"
+source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5#15ee7b3c6ff8a037b8772fc0459b0c22042c4ac5"
 
 [[package]]
 name = "tsfun"

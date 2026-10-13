@@ -23,18 +23,17 @@ static API: AtomicPtr<PluginApi> = AtomicPtr::new(core::ptr::null_mut());
 
 /// The plugin API table, once [`find_api`] found it.
 fn api_table() -> Option<&'static PluginApi> {
-    // SAFETY: NULL or the server's static table (`find_api` checked that it has the version-1
-    // fields, the only ones tsx reads), which lives as long as the game library.
+    // SAFETY: NULL or the server's static table (`find_api` checked its version and size), which
+    // lives as long as the game library.
     unsafe { API.load(Ordering::Relaxed).as_ref() }
 }
 
-/// Looks the API up in the loaded game library; tsx needs only the version-1 part of the
-/// table, so it also runs on servers without the entity hooks. Returns why it isn't available.
+/// Looks the API up in the loaded game library. Returns why it isn't available.
 pub fn find_api() -> Result<(), String> {
     if api_table().is_some() {
         return Ok(());
     }
-    let t = amxx::tsapi::find(amxx::tsapi::V1_SIZE, 1)?;
+    let t = amxx::tsapi::find()?;
     API.store(t as *const PluginApi as *mut PluginApi, Ordering::Relaxed);
     Ok(())
 }

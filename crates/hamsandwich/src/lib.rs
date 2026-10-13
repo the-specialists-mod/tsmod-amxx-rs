@@ -4,7 +4,7 @@
 
 //! Ham Sandwich (library `hamsandwich`): hooks and calls entity "virtual functions". Stock patches
 //! C++ vtables; the Rust server has none, so this module installs the server's single entity hook
-//! (`ts-plugin-api` version 2) and dispatches each call to the plugins' forwards per function and
+//! (`ts-plugin-api`'s entity hooks, version 3) and dispatches each call to the plugins' forwards per function and
 //! class, with stock's semantics.
 //!
 //! Layout: [`hooklist`] (every `Ham` function and its signature, generated from upstream),

@@ -13,7 +13,7 @@ Start with [README.md](README.md), then [docs/design.md](docs/design.md).
 |---|---|
 | What upstream tsx does (natives, forwards, stats, file format) | AMX Mod X source, `../ref/amxmodx/modules/ts/tsx` (`NBase.cpp`, `NRank.cpp`, `CRank.cpp`, `CMisc.cpp`, `usermsg.cpp`, `moduleconfig.cpp`, `Utils.cpp`) and `plugins/include/ts*.inc` |
 | What stock hamsandwich does | `../ref/amxmodx/modules/hamsandwich` (`hook_native.cpp` table and registration, `hook_callbacks.cpp` call protocol, `call_funcs.cpp` ExecuteHam, `DataHandler.{h,cpp}`, `pdata.cpp`), `plugins/include/hamsandwich.inc`, `ham_const.inc` |
-| The entity hook contract | The port's `crates/plugin-api/src/lib.rs` ("Entity hooks (version 2)") and `docs/implementation/plugin-api.md` §7 (which functions fire for which classes; the dev aid `ts_dev_hamlog 1`, never left on in e2e) |
+| The entity hook contract | The port's `crates/plugin-api/src/lib.rs` ("Entity hooks") and `docs/implementation/plugin-api.md` §7 (which functions fire for which classes; the dev aid `ts_dev_hamlog 1`, never left on in e2e) |
 | The module and metamod ABIs | `../ref/amxmodx/public/sdk/amxxmodule.{h,cpp}`, `amxmodx/amx.h`, `amxmodx/CModule.cpp`; `../ref/metamod/metamod/{meta_api,plinfo,mutil}.h` |
 | What the server sends and how TS behaves | The port: `crates/shared/src/protocol` (message layouts), `crates/plugin-api` (the plugin API contract), `docs/implementation/plugin-api.md`; the TS decomp at `../ts30-decomp` |
 | How plugins use the modules | `../ref/ts-plugins` (real plugins; data only, never run their scripts) |
@@ -120,7 +120,9 @@ change, compare `nm -D --defined-only` / `objdump -p`.
   exactly when it called pre. Post matches the top frame by `(ham, this)`; never by the
   `HamCall` address, which changes between pre and post (the server moves the struct). Stock decides the return by the *last* forward's result, not the
   highest; keep that.
-- **The plugin API table grows**: tsx needs only `amxx::tsapi::V1_SIZE`, hamsandwich version 2.
+- **The plugin API is versioned, not append-only**: `amxx::tsapi::find` takes only the exact
+  version this build's `ts-plugin-api` has (3, `TSRS_PluginApi003`). A port API bump means
+  repinning the port crates and moving the modules in the same round.
 
 ## Git
 
