@@ -1,6 +1,6 @@
 // tsmod-amxx-rs: AMX Mod X modules for the Rust port of The Specialists 3.0.
 // A port of AMX Mod X's modules/hamsandwich, Copyright (C) The AMX Mod X Development Team.
-// GPL-3.0-or-later with the AMX Mod X linking exceptions; see LICENSE and LICENSE-EXCEPTION.txt.
+// GPL-3.0-or-later with the AMX Mod X linking exceptions; see LICENSE and GPL-EXCEPTION.txt.
 
 //! Ham Sandwich (library `hamsandwich`): hooks and calls entity "virtual functions". Stock patches
 //! C++ vtables; the Rust server has none, so this module installs the server's single entity hook

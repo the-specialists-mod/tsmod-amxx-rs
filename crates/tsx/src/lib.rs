@@ -1,7 +1,7 @@
 // tsmod-amxx-rs: AMX Mod X's TS modules (tsx, tsfun) for the Rust port of The Specialists 3.0.
 // A port of AMX Mod X's modules/ts/tsx, Copyright (C) The AMX Mod X Development Team,
 // Copyright (C) 2004 Lukasz Wlasinski. GPL-3.0-or-later with the AMX Mod X linking exceptions;
-// see LICENSE and LICENSE-EXCEPTION.txt.
+// see LICENSE and GPL-EXCEPTION.txt.
 
 //! TSX: AMX Mod X's stats and TS natives module (library `tsx`, class `xstats`), for servers
 //! running the Rust TS server (`the-specialistsmod-rs`). It is a metamod plugin too: it reads

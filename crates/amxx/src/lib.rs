@@ -1,6 +1,6 @@
 // tsmod-amxx-rs: AMX Mod X's TS modules (tsx, tsfun) for the Rust port of The Specialists 3.0.
 // Copyright (C) The AMX Mod X Development Team (the module SDK this crate ports).
-// GPL-3.0-or-later with the AMX Mod X linking exceptions; see LICENSE and LICENSE-EXCEPTION.txt.
+// GPL-3.0-or-later with the AMX Mod X linking exceptions; see LICENSE and GPL-EXCEPTION.txt.
 
 //! An AMX Mod X module SDK in Rust: the FFI layer of this workspace.
 //!

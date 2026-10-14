@@ -1,7 +1,7 @@
 // tsmod-amxx-rs: AMX Mod X's TS modules (tsx, tsfun) for the Rust port of The Specialists 3.0.
 // A port of AMX Mod X's modules/ts/tsfun (moduleconfig.h), Copyright (C) The AMX Mod X
 // Development Team. GPL-3.0-or-later with the AMX Mod X linking exceptions; see LICENSE and
-// LICENSE-EXCEPTION.txt.
+// GPL-EXCEPTION.txt.
 
 //! TSFun: an empty module with the library name `tsfun`, so plugins that `#include <tsfun>`
 //! (`#pragma reqlib tsfun`) load. Upstream moved every tsfun native into tsx; this is the same

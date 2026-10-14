@@ -172,7 +172,11 @@ Pushing a `v*` tag builds both platforms and publishes `tsmod-amxx-rs-<tag>-<pla
 ## License and credits
 
 GPL-3.0-or-later, with AMX Mod X's linking exceptions ([LICENSE](LICENSE),
-[LICENSE-EXCEPTION.txt](LICENSE-EXCEPTION.txt)). This is a port of AMX Mod X's TS modules,
+[GPL-EXCEPTION.txt](GPL-EXCEPTION.txt)). This is a port of AMX Mod X's TS modules,
 hamsandwich and module SDK: Copyright (C) The AMX Mod X Development Team; tsx originally by Lukasz Wlasinski
 (2004), based on AMX Mod by Aleksander Naszko ("OLO"). `include/tsxaddon.inc`: Avalanche, Twilight Suzuka and Harbu. Metamod's interface: Will Day
 (metamod), the metamod-p and Metamod-R teams. The Specialists by The Specialists team.
+
+The port's plugin API crate `ts-plugin-api` (a dependency from the-specialistsmod-rs) is
+MIT-licensed. MIT is compatible with the GPL, so the built modules are is distributed under the
+GPL as a whole. Keep the API crate's MIT notice with it.
