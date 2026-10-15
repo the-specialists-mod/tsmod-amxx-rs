@@ -10,6 +10,8 @@
 #include <tsx>
 #include <tsfun>
 #include <tsxaddon> // the repo's patched copy: ts_setuserammo is a native
+#include <fun>
+#include <hamsandwich>
 
 // Registered by tsx (NBase.cpp) but not declared in the stock includes.
 native ts_getuseritems(index);
@@ -22,6 +24,8 @@ new g_last_killer;
 new bool:g_api;
 new g_give_id;
 new g_set_id;
+// The thrown knife (#5).
+new g_kn_thrower, g_kn_victim, g_kn_damage, g_kn_death, g_kn_tries;
 
 check(const name[], ok, const detail[] = "")
 {
@@ -51,6 +55,8 @@ public plugin_init()
 	set_task(21.0, "t_getters");
 	set_task(25.0, "t_give");
 	set_task(26.5, "t_give_check");
+	set_task(30.0, "t_knife");
+	set_task(49.0, "t_knife_check");
 	set_task(50.0, "t_stats");
 	set_task(51.0, "t_finish");
 }
@@ -82,6 +88,10 @@ dump_rank(const tag[])
 public client_damage(attacker, victim, damage, wpnindex, hitplace, TA)
 {
 	g_damage++;
+	if (wpnindex == TSW_TKNIFE) {
+		log_to_file(LOG, "client_damage (thrown knife): att=%d vic=%d dmg=%d hit=%d", attacker, victim, damage, hitplace);
+		if (attacker == g_kn_thrower && victim == g_kn_victim) g_kn_damage++;
+	}
 	if (g_damage <= 3)
 		log_to_file(LOG, "client_damage: att=%d vic=%d dmg=%d wpn=%d hit=%d ta=%d", attacker, victim, damage, wpnindex, hitplace, TA);
 }
@@ -93,6 +103,10 @@ public client_death(killer, victim, wpnindex, hitplace, TK)
 	xmod_get_wpnname(wpnindex, name, charsmax(name));
 	if (name[0]) g_death_named++;
 	g_last_killer = killer;
+	if (wpnindex == TSW_TKNIFE) {
+		log_to_file(LOG, "client_death (thrown knife): killer=%d victim=%d (%s) hit=%d", killer, victim, name, hitplace);
+		if (killer == g_kn_thrower && victim == g_kn_victim) g_kn_death++;
+	}
 	if (g_death <= 5)
 		log_to_file(LOG, "client_death: killer=%d victim=%d wpn=%d (%s) hit=%d tk=%d lastfrag=%d flags=%d",
 			killer, victim, wpnindex, name, hitplace, TK, ts_getuserlastfrag(killer), ts_getuserkillflags(killer));
@@ -103,6 +117,96 @@ first_alive()
 	for (new i = 1; i <= get_maxplayers(); i++)
 		if (is_user_alive(i)) return i;
 	return 0;
+}
+
+// ---- The thrown knife (#5) ----
+// Bots never throw knives, so the plugin makes one: the bots stand still (ts_bot_stop 1), a
+// thrower gets the combat knife and faces a victim moved 96 units in front of it with 1 health,
+// and ham's Weapon_SecondaryAttack on its weapon_tsgun throws (CTSGun::SecondaryAttack's knife
+// branch). client_damage and client_death must name the thrower and TSW_TKNIFE, found through the
+// API's projectile_owner.
+
+public t_knife()
+{
+	if (g_kn_death) return;
+	if (++g_kn_tries > 6) return;
+	set_cvar_num("ts_bot_stop", 1);
+	g_kn_thrower = 0; g_kn_victim = 0;
+	for (new i = 1; i <= get_maxplayers(); i++) {
+		if (!is_user_alive(i)) continue;
+		if (!g_kn_thrower) g_kn_thrower = i;
+		else if (!g_kn_victim) g_kn_victim = i;
+	}
+	if (!g_kn_victim) { set_task(2.0, "t_knife"); return; }
+	ts_giveweapon(g_kn_thrower, TSW_CKNIFE, 0, 0);
+	engclient_cmd(g_kn_thrower, "weapon_25");
+	set_task(0.5, "t_knife_throw");
+}
+
+public t_knife_throw()
+{
+	new t = g_kn_thrower, v = g_kn_victim;
+	if (!is_user_alive(t) || !is_user_alive(v)) { set_task(1.0, "t_knife"); return; }
+	new clip, ammo, mode, extra;
+	if (ts_getuserwpn(t, clip, ammo, mode, extra) != TSW_CKNIFE) {
+		log_to_file(LOG, "knife: try %d: thrower %d holds %d, switching again", g_kn_tries, t, ts_getuserwpn(t, clip, ammo, mode, extra));
+		engclient_cmd(t, "weapon_25");
+		set_task(1.0, "t_knife");
+		return;
+	}
+	// A free spot 96 units away in one of eight directions (eye-level line of sight to 160).
+	new Float:o[3], Float:ofs[3], Float:eye[3], Float:to[3], Float:hit[3], Float:dest[3];
+	entity_get_vector(t, EV_VEC_origin, o);
+	entity_get_vector(t, EV_VEC_view_ofs, ofs);
+	eye[0] = o[0] + ofs[0]; eye[1] = o[1] + ofs[1]; eye[2] = o[2] + ofs[2];
+	new found;
+	for (new k = 0; k < 8 && !found; k++) {
+		new Float:yaw = float(k) * 45.0;
+		new Float:dx = floatcos(yaw, degrees), Float:dy = floatsin(yaw, degrees);
+		to[0] = eye[0] + dx * 160.0; to[1] = eye[1] + dy * 160.0; to[2] = eye[2];
+		trace_line(t, eye, to, hit);
+		if (get_distance_f(eye, hit) < 150.0) continue;
+		to[2] = o[2] - 18.0; // and at the knees
+		new Float:low[3]; low[0] = o[0]; low[1] = o[1]; low[2] = o[2] - 18.0;
+		trace_line(t, low, to, hit);
+		if (get_distance_f(low, hit) < 150.0) continue;
+		dest[0] = o[0] + dx * 96.0; dest[1] = o[1] + dy * 96.0; dest[2] = o[2];
+		found = 1;
+	}
+	if (!found) { log_to_file(LOG, "knife: try %d: no room around %d", g_kn_tries, t); set_task(1.0, "t_knife"); return; }
+	new Float:zero[3];
+	entity_set_vector(v, EV_VEC_velocity, zero);
+	entity_set_origin(v, dest);
+	set_user_health(v, 1);
+	new Float:dir[3], Float:ang[3];
+	dir[0] = dest[0] - eye[0]; dir[1] = dest[1] - eye[1]; dir[2] = dest[2] - eye[2];
+	vector_to_angle(dir, ang);
+	ang[0] = -ang[0]; // view angles look down with positive pitch
+	entity_set_vector(t, EV_VEC_v_angle, ang);
+	entity_set_vector(t, EV_VEC_angles, ang);
+	new gun = find_ent_by_owner(-1, "weapon_tsgun", t);
+	if (!gun) { log_to_file(LOG, "knife: try %d: no weapon_tsgun for %d", g_kn_tries, t); set_task(1.0, "t_knife"); return; }
+	log_to_file(LOG, "knife: try %d: thrower %d at %.0f %.0f %.0f, victim %d at %.0f %.0f %.0f, gun %d",
+		g_kn_tries, t, o[0], o[1], o[2], v, dest[0], dest[1], dest[2], gun);
+	ExecuteHam(Ham_Weapon_SecondaryAttack, gun);
+	set_task(1.5, "t_knife_done");
+}
+
+public t_knife_done()
+{
+	if (!g_kn_death) { set_task(0.1, "t_knife"); return; }
+	set_cvar_num("ts_bot_stop", 0);
+}
+
+public t_knife_check()
+{
+	set_cvar_num("ts_bot_stop", 0);
+	new d[160], stats[8], body[8], name[32];
+	xmod_get_wpnname(TSW_TKNIFE, name, charsmax(name));
+	new w = g_kn_thrower ? get_user_wstats(g_kn_thrower, TSW_TKNIFE, stats, body) : 0;
+	formatex(d, charsmax(d), "tries=%d thrower=%d victim=%d damage=%d death=%d wstats=%d kills=%d hits=%d name=%s",
+		g_kn_tries, g_kn_thrower, g_kn_victim, g_kn_damage, g_kn_death, w, stats[0], stats[5], name);
+	check("thrown_knife", g_kn_damage > 0 && g_kn_death > 0 && w && stats[0] > 0 && stats[5] > 0, d);
 }
 
 public t_static()

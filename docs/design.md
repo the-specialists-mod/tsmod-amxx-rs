@@ -209,6 +209,12 @@ Differences:
   (deaths - kills) loaded all 8 entries with the same counters and body hits, in the reversed
   order, so `get_score` ran through `LoadAmxScript`. stop.sh's SIGTERM also saves on Linux
   (ReHLDS shuts down cleanly), not under Wine.
+* Thrown knife (#5), same day and setup, both roots: `tsx_e2e` freezes the bots
+  (`ts_bot_stop 1`), gives one the combat knife, moves another 96 units in front of it with 1
+  health, aims the thrower at it and throws with `ExecuteHam(Ham_Weapon_SecondaryAttack)` on its
+  `weapon_tsgun`. The knife killed on the first try: `client_damage` and `client_death` named the
+  thrower and `TSW_TKNIFE` (29, "Throwing Knife"), and the thrower's `get_user_wstats` for it
+  showed the kill and the hit (`saveHit` through `projectile_owner`).
 
 ## 8. Ham Sandwich
 
