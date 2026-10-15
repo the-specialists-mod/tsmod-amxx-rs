@@ -215,6 +215,12 @@ Differences:
   `weapon_tsgun`. The knife killed on the first try: `client_damage` and `client_death` named the
   thrower and `TSW_TKNIFE` (29, "Throwing Knife"), and the thrower's `get_user_wstats` for it
   showed the kill and the hit (`saveHit` through `projectile_owner`).
+* metamod-p (#1), same day: the whole e2e (21 tsx and 20 hamsandwich checks, the stats round trip)
+  passes with metamod-p v1.21p109 instead of Metamod-R (`MM=metamod-p` amxx-testenv roots), on
+  ReHLDS 3.15 (Linux and Windows under Wine) and on stock HLDS 25th anniversary (Linux build
+  10211 of Oct 8 2024, Windows build 10210 under Wine: the testenv roots with the
+  `~/games/hlds25_*` engine files in place of ReHLDS's). On HLDS 25 the changelevel, `quit` and
+  restart behave as on ReHLDS, and the 4 quota bots play without a human.
 
 ## 8. Ham Sandwich
 

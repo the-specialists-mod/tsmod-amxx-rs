@@ -33,7 +33,9 @@ the weapon in hand.
   there).
 * Metamod: Metamod-R or metamod-p (interface 5:13). AMX Mod X loads tsx as a metamod plugin
   by itself; don't list it in metamod's `plugins.ini`.
-* A 32-bit server (AMX Mod X is 32-bit only): HLDS/ReHLDS on Linux or Windows.
+* A 32-bit server (AMX Mod X is 32-bit only): HLDS/ReHLDS on Linux or Windows. The end-to-end
+  tests pass on ReHLDS 3.15 with Metamod-R 1.3 or metamod-p 1.21p109, and on HLDS 25th
+  anniversary with metamod-p (`docs/design.md` §7).
 
 ## Installing
 
