@@ -235,8 +235,10 @@ touch the private data: -1 (null) and a no-op.
 query functions (`ObjectCaps`, `IsPlayer`, `Center`, ...) now fire, so `RegisterHam` works for them
 as for any other. One deviation from stock: the port's `Ham_TS_GiveSlowMul` returns its float
 (stock declares it `Void_Void`), so `hooks::entry` gives it a `Float` return:
-`GetHamReturnFloat` / `SetHamReturnFloat` work in its hooks, and `ExecuteHam` writes the result to
-an out parameter if the plugin passes one (a stock-compiled call without one still runs).
+`SetHamReturnFloat` / `GetHamReturnFloat` (the override, 0 until set, as stock) and
+`GetOrigHamReturnFloat` (the original's `max(fuser1, 0.01)`, in post) work in its hooks, and
+`ExecuteHam` writes the result to an out parameter if the plugin passes one (a stock-compiled call
+without one still runs).
 
 **Without API version 4** the module loads, logs one warning and registers its natives;
 `IsHamValid` is 0 and `RegisterHam`/`ExecuteHam` fail through `__fatal_ham_error` as stock does

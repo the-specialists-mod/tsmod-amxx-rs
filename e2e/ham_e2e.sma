@@ -80,11 +80,13 @@ public fw_preframe(gun)
 	g_preframes++;
 }
 
-// The port's Ham_TS_GiveSlowMul returns its float (stock declares it void).
+// The port's Ham_TS_GiveSlowMul returns its float (stock declares it void): max(fuser1, 0.01).
+// As in stock, GetHamReturnFloat is the override (0 unless a hook set one); the result of the
+// original is GetOrigHamReturnFloat.
 public fw_slowmul_post(id)
 {
 	g_slowmul++;
-	GetHamReturnFloat(g_slowmul_ret);
+	GetOrigHamReturnFloat(g_slowmul_ret);
 }
 
 public fw_td_pre(victim, inflictor, attacker, Float:damage, bits)
@@ -198,7 +200,7 @@ public t_events()
 	formatex(d, charsmax(d), "preframes=%d bad=%d slowmul=%d ret=%.3f", g_preframes, g_preframe_bad, g_slowmul, g_slowmul_ret);
 	log_to_file(LOG, "v4: %s", d);
 	check("item_preframe", g_preframes > 0 && g_preframe_bad == 0, d);
-	check("giveslowmul_float", g_slowmul > 0 && g_slowmul_ret > 0.0 && g_slowmul_ret <= 2.0, d);
+	check("giveslowmul_float", g_slowmul > 0 && g_slowmul_ret >= 0.01 && g_slowmul_ret <= 2.0, d);
 }
 
 public t_finish()
