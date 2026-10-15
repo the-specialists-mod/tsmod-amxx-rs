@@ -81,6 +81,9 @@ impl TsApi for FakeApi {
     }
 }
 
+/// A plugin's forward in [`FakeGame::fire`].
+pub type OnFire = Box<dyn Fn(&Event)>;
+
 #[derive(Default)]
 pub struct FakeGame {
     pub time: Cell<f32>,
@@ -89,6 +92,9 @@ pub struct FakeGame {
     pub api: Option<FakeApi>,
     pub logs: RefCell<Vec<String>>,
     pub fired: RefCell<Vec<Event>>,
+    /// What `fire` returns (the forward's result), and what runs inside it (a plugin).
+    pub fire_result: Cell<i32>,
+    pub on_fire: RefCell<Option<OnFire>>,
     pub given: RefCell<Vec<(i32, i32, i32, i32)>>,
     pub commands: RefCell<Vec<(i32, String)>>,
 }
@@ -209,8 +215,13 @@ impl Game for FakeGame {
     fn give_powerup(&self, p: i32, e: i32) {
         self.given.borrow_mut().push((p, e, -1, -1));
     }
-    fn fire(&self, event: Event) {
+    fn fire(&self, event: Event) -> i32 {
         self.fired.borrow_mut().push(event);
+        // A plugin's forward: may call natives (the module state is released).
+        if let Some(f) = self.on_fire.borrow().as_ref() {
+            f(&event);
+        }
+        self.fire_result.get()
     }
 }
 

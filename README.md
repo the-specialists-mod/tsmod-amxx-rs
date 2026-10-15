@@ -16,16 +16,17 @@ the weapon in hand.
 
 | Module | Library | File (Linux / Windows) | What |
 |---|---|---|---|
-| TSX | `tsx`, class `xstats` | `tsx_amxx_i386.so` / `tsx_amxx.dll` | All the TS natives, the stats natives, `client_damage` / `client_death`, the rank. A metamod plugin too. |
+| TSX | `tsx`, class `xstats` | `tsx_amxx_i386.so` / `tsx_amxx.dll` | All the TS natives, the stats natives, `client_damage` / `client_death`, tsfun.inc's `client_stunt` / `client_powerup` / `Melee_Attack`, the rank. A metamod plugin too. |
 | TSFun Wrapper | `tsfun` | `tsfun_amxx_i386.so` / `tsfun_amxx.dll` | Empty, as upstream: lets plugins with `#include <tsfun>` (`#pragma reqlib tsfun`) load. |
-| Ham Sandwich | `hamsandwich` | `hamsandwich_amxx_i386.so` / `hamsandwich_amxx.dll` | `RegisterHam`, `ExecuteHam` and the rest, over the server's entity hooks (plugin API version 4, including the gun's `Item_*` / `Weapon_*` functions on `weapon_tsgun`). Replaces AMX Mod X's file of the same name. A metamod plugin too. |
+| Ham Sandwich | `hamsandwich` | `hamsandwich_amxx_i386.so` / `hamsandwich_amxx.dll` | `RegisterHam`, `ExecuteHam` and the rest, over the server's entity hooks (plugin API version 5, including the gun's `Item_*` / `Weapon_*` functions on `weapon_tsgun`). Replaces AMX Mod X's file of the same name. A metamod plugin too. |
 
 ## Requirements
 
 * The Rust TS server ([the-specialistsmod-rs](https://github.com/the-specialists-mod/the-specialistsmod-rs))
   on Linux or Windows, with the plugin API (`main` from `f585a02` on; releases after v0.2.0).
   Older builds work too, but the natives that change players do nothing (see below).
-  Both modules need version 4 of the API (`TSRS_PluginApi004`, the-specialistsmod-rs#117, #99); a
+  Both modules need version 5 of the API (`TSRS_PluginApi005`: kill reports and the tsfun
+  forwards, tsmod-amxx-rs#8, #15, the-specialistsmod-rs#197); a
   server with an older API, or the older modules on a newer server, find no table. Without it,
   `IsHamValid` is false and `RegisterHam`/`ExecuteHam` fail as stock does for functions missing
   from its gamedata.
@@ -65,10 +66,12 @@ tsx reads it at map start and when a player enters the game.
 ## Native compatibility
 
 Every native upstream tsx registers (`NBase.cpp`, `NRank.cpp`) is registered with the same name
-and arguments, plus `ts_setuserammo`. tsx.inc, tsfun.inc and tsstats.inc are AMX Mod X's own
-(use those shipped with AMX Mod X); `tsxaddon.inc` needs this repository's copy, and
+and arguments, plus `ts_setuserammo` and `ts_set_fuattack`. tsx.inc and tsstats.inc are AMX Mod
+X's own (use those shipped with AMX Mod X); `tsxaddon.inc` needs this repository's copy,
 `tsconst.inc` does for TS 3.0's weapon ids (`TSW_CONTENDER`, `TSW_ASKORPIONS`, and kung fu and
-the thrown knife where tsx reports them by default).
+the thrown knife where tsx reports them by default), and `tsfun.inc` does for `client_stunt`,
+`client_powerup`, `Melee_Attack` and `ts_set_fuattack` (the stock file marks them unavailable;
+plugins built against it still get the forwards).
 
 * **exact**: same behaviour as upstream.
 * **API**: reads or writes the server through the plugin API. Getters fall back to what the
@@ -97,7 +100,8 @@ the thrown knife where tsx reports them by default).
 | `ts_setuserammo` | API, port addition | Was a function in `tsxaddon.inc` that wrote TS 2.x's private data; now a tsx native with its behaviour (see below) |
 | `ts_set_bullettrail` | unsupported | TS 3.0 has no per-player bullet trails; returns 0 |
 | `ts_giveweapon`, `ts_createpwup`, `ts_givepwup` | exact | Same entity approach (`ts_groundweapon` / `ts_powerup`, KeyValue, Spawn, Use/Touch). `ts_createpwup`'s origin is optional, as `tsfun.inc` declares one argument |
-| `ts_getuserlastfrag`, `ts_getuserkillflags` | approx. | TS 3.0's scoring (2 s double kills, +1 stunts and slides, specialists at a 9-kill spree), not upstream's TS 2.x model; the last frag is the change in `pev->frags` ([design §4](docs/design.md#4-messages)) |
+| `ts_getuserlastfrag`, `ts_getuserkillflags` | API, approx. | TS 3.0's scoring (2 s double kills, +1 stunts and slides, specialists at a 9-kill spree), not upstream's TS 2.x model: the server's report of the kill, else predicted; the last frag is the frags the kill gave ([design §4](docs/design.md#4-messages)) |
+| `ts_set_fuattack` | API, port addition | Commented out in stock tsfun.inc ("Alters a fu attack"): during `Melee_Attack` for its player, sets the move's time and damage and returns 1; else 0 |
 | `ts_setpddata` | approx. | Stored and unused: the thrown knife's owner comes from the API (or `pev->owner`) |
 | `register_statsfwd` | exact | Returns 1 |
 | `get_user_wstats`, `get_user_wrstats` | approx. | Shots are counted from the fire events (TS 3.0 never sends `ClipInfo`, upstream's source), so these return data |
@@ -106,9 +110,17 @@ the thrown knife where tsx reports them by default).
 
 Forwards `client_damage(attacker, victim, damage, wpnindex, hitplace, TA)` and
 `client_death(killer, victim, wpnindex, hitplace, TK)` work as upstream, from the game's
-`TSHealth` message and the victim's `dmg_inflictor`/`dmg_take`. The kill's weapon comes from
-TS's `DeathMsg` (kung fu when TS says "Kung Fu" or "world"), where upstream reported every kill
-whose frags differed from its TS 2.x prediction as kung fu.
+`TSHealth` message and the victim's `dmg_inflictor`/`dmg_take`. With the plugin API, the death
+waits for the server's report of how it scored the kill (killer, frags, tags, weapon), so a kill
+the server scores late is no longer a suicide; without it, the kill's weapon comes from TS's
+`DeathMsg` (kung fu when TS says "Kung Fu" or "world"), where upstream reported every kill whose
+frags differed from its TS 2.x prediction as kung fu.
+
+Port additions: tsfun.inc's `client_stunt(id, stunttype)` (`STUNT_ROLL` 2, `STUNT_DIVE` 3,
+`STUNT_GETUP` 4, `STUNT_FLIP` 5, and 6 wall jump / 7 wall climb), `client_powerup(id, powerup)`
+(a held power-up used, or one that works at once picked up) and `Melee_Attack(id, Float:time,
+Float:damage)` (before a kung-fu move; `ts_set_fuattack` changes it, `PLUGIN_HANDLED` blocks it)
+fire from the server's plugin API (version 5). Upstream declared them "UNAVAILABLE IN 1.70".
 
 ### Weapon ids
 

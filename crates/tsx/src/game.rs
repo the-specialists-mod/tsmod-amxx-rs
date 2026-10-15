@@ -25,12 +25,19 @@ pub trait TsApi {
 
 /// A forward the logic asks the FFI layer to run once module state is released (plugins may
 /// call the module's natives from it).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Event {
     /// `client_damage(attacker, victim, damage, wpnindex, hitplace, TA)`.
     Damage { attacker: i32, victim: i32, damage: i32, weapon: i32, aim: i32, ta: i32 },
     /// `client_death(killer, victim, wpnindex, hitplace, TK)`.
     Death { killer: i32, victim: i32, weapon: i32, aim: i32, tk: i32 },
+    /// `client_stunt(id, stunttype)` (tsfun.inc; port addition, `crate::forwards`).
+    Stunt { player: i32, stunt: i32 },
+    /// `client_powerup(id, powerup)` (tsfun.inc; port addition).
+    Powerup { player: i32, powerup: i32 },
+    /// `Melee_Attack(id, Float:time, Float:damage)` (tsfun.inc; port addition): its result says
+    /// whether a plugin returned `PLUGIN_HANDLED`.
+    MeleeAttack { player: i32, time: f32, damage: f32 },
 }
 
 /// Engine and game access by entity index. Entity 0 is the world; `None` stands for NULL.
@@ -94,6 +101,7 @@ pub trait Game {
     fn create_powerup(&self, kind: i32, origin: [f32; 3]) -> i32;
     /// `ts_givepwup`: moves the power-up onto the player, touches it and removes it.
     fn give_powerup(&self, player: i32, ent: i32);
-    /// Runs a forward (only call with module state released).
-    fn fire(&self, event: Event);
+    /// Runs a forward (only call with module state released) and returns what `ExecuteForward`
+    /// returned (`Melee_Attack`: the first `PLUGIN_HANDLED`, else 0).
+    fn fire(&self, event: Event) -> i32;
 }

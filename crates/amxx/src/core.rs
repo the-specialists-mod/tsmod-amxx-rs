@@ -147,8 +147,19 @@ pub fn is_player_ingame(index: i32) -> bool {
 pub struct Forward(pub i32);
 
 /// `MF_RegisterForward(name, ET_IGNORE, FP_CELL x cells, FP_DONE)`: a multi-plugin forward with
-/// `cells` cell parameters, the only kind TS's modules register. `None` before the core attached.
+/// `cells` cell parameters (floats as cells holding their bits), the only kind TS's modules
+/// register. `None` before the core attached.
 pub fn register_forward(name: &CStr, cells: usize) -> Option<Forward> {
+    register_forward_exec(name, ET_IGNORE, cells)
+}
+
+/// [`register_forward`] with `ET_STOP`: [`execute_forward`] stops at the first plugin returning
+/// more than 0 (`PLUGIN_HANDLED`) and returns that, else 0.
+pub fn register_forward_stop(name: &CStr, cells: usize) -> Option<Forward> {
+    register_forward_exec(name, ET_STOP, cells)
+}
+
+fn register_forward_exec(name: &CStr, exec: c_int, cells: usize) -> Option<Forward> {
     let c = core()?;
     let (f, n) = (c.register_forward, name.as_ptr());
     const C: c_int = FP_CELL;
@@ -157,13 +168,13 @@ pub fn register_forward(name: &CStr, cells: usize) -> Option<Forward> {
     // the SDK documents.
     let id = unsafe {
         match cells {
-            0 => f(n, ET_IGNORE, D),
-            1 => f(n, ET_IGNORE, C, D),
-            2 => f(n, ET_IGNORE, C, C, D),
-            3 => f(n, ET_IGNORE, C, C, C, D),
-            4 => f(n, ET_IGNORE, C, C, C, C, D),
-            5 => f(n, ET_IGNORE, C, C, C, C, C, D),
-            6 => f(n, ET_IGNORE, C, C, C, C, C, C, D),
+            0 => f(n, exec, D),
+            1 => f(n, exec, C, D),
+            2 => f(n, exec, C, C, D),
+            3 => f(n, exec, C, C, C, D),
+            4 => f(n, exec, C, C, C, C, D),
+            5 => f(n, exec, C, C, C, C, C, D),
+            6 => f(n, exec, C, C, C, C, C, C, D),
             _ => return None,
         }
     };

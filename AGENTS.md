@@ -32,8 +32,8 @@ crates/hamsandwich/  Ham Sandwich; #![deny(unsafe_code)] except src/ffi/. src/ho
                 <hook_native.cpp> <ham_const.inc> src/hooklist.rs); don't edit it by hand
 xtask/          cargo xtask build | dist | lint | test | e2e
 e2e/            tsx_e2e.sma and ham_e2e.sma, the end-to-end test plugins
-include/        tsxaddon.inc (ts_setuserammo is a tsx native) and tsconst.inc (TS 3.0's
-                weapon ids), patched
+include/        tsxaddon.inc (ts_setuserammo is a tsx native), tsconst.inc (TS 3.0's weapon
+                ids) and tsfun.inc (the forwards tsx fires, ts_set_fuattack), patched
 ```
 
 1. **`unsafe` lives in `crates/amxx` and the modules' `src/ffi/` only.** Every `unsafe` block has a
@@ -65,7 +65,7 @@ cargo xtask test                 # unit tests, host and i686 (i686 runs the ABI 
 cargo xtask build [--release]    # both targets; must build without warnings
 cargo xtask lint                 # cargo fmt --check, clippy --all-targets -D warnings, both targets
 cargo xtask dist [--debug-info]  # dist/<platform>/addons/amxmodx/modules/ with AMXX's file names
-                                 # (+ scripting/include/tsxaddon.inc, tsconst.inc); checks the DLLs import no
+                                 # (+ scripting/include/tsxaddon.inc, tsconst.inc, tsfun.inc); checks the DLLs import no
                                  # MinGW runtime and the metamod modules export GiveFnptrsToDll
 cargo xtask e2e [linux] [win]    # end-to-end, below (~1.5 min per root)
 ```
@@ -124,7 +124,7 @@ change, compare `nm -D --defined-only` / `objdump -p`.
   `HamCall` address, which changes between pre and post (the server moves the struct). Stock decides the return by the *last* forward's result, not the
   highest; keep that.
 - **The plugin API is versioned, not append-only**: `amxx::tsapi::find` takes only the exact
-  version this build's `ts-plugin-api` has (4, `TSRS_PluginApi004`). A port API bump means
+  version this build's `ts-plugin-api` has (5, `TSRS_PluginApi005`). A port API bump means
   repinning the port crates and moving the modules in the same round.
 
 ## Git

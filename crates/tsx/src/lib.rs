@@ -8,12 +8,14 @@
 //! the game's user messages and registers `client_damage` / `client_death`.
 //!
 //! Layout: [`state`] (hook logic), [`msgs`] (message parsing), [`natives`], [`rank`] and
-//! [`stats`] (the persistent rank), [`weapons`], [`player`]; [`game`] is the boundary to the
+//! [`stats`] (the persistent rank), [`weapons`], [`player`], [`forwards`] (tsfun.inc's
+//! `client_stunt`, `client_powerup` and `Melee_Attack`, from the server's API); [`game`] is the boundary to the
 //! engine, the game and the server's plugin API, which `ffi` implements. Only `ffi` uses
 //! `unsafe`.
 
 #![deny(unsafe_code)]
 
+pub mod forwards;
 pub mod game;
 pub mod msgs;
 pub mod natives;

@@ -2,7 +2,7 @@
 
 //! Finding the Rust TS server's plugin API (`ts-plugin-api`): the game library exports tier1's
 //! `CreateInterface`, which returns the table for `ts_plugin_api::INTERFACE_NAME`
-//! (`TSRS_PluginApi004`). The name carries the version, and versions aren't compatible: a server
+//! (`TSRS_PluginApi005`). The name carries the version, and versions aren't compatible: a server
 //! with another version answers NULL, and the module says so.
 
 use core::ffi::{c_char, c_int, c_void};

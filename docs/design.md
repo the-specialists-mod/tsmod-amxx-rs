@@ -43,8 +43,9 @@ AMX Mod X sees `Meta_Attach` in tsx and loads it as a metamod plugin first
 3. `AMXX_Attach`: requests only the core functions tsx calls (upstream's SDK requests ~80 and
    refuses to load if one is missing; `LoadAmxScriptEx` is optional, so 1.8.2 cores load it),
    adds the natives, loads the score plugin and `tsstats.dat`.
-4. `AMXX_PluginsLoaded`: registers `client_damage` and `client_death`, then looks up the plugin
-   API.
+4. `AMXX_PluginsLoaded`: registers `client_damage` and `client_death` (and, port additions,
+   tsfun.inc's `client_stunt`, `client_powerup` and `Melee_Attack`), then looks up the plugin
+   API and registers tsx as its listener (section 3).
 
 Hooks (as upstream): pre `ClientDisconnect`, `ServerDeactivate`; post `ClientConnect`,
 `ClientPutInServer`, `ClientUserInfoChanged`, `ServerActivate`, `PlayerPreThink`; engine post
@@ -56,17 +57,34 @@ Hooks (as upstream): pre `ClientDisconnect`, `ServerDeactivate`; post `ClientCon
 The Rust server exports tier1's `CreateInterface`. tsx asks metamod for the game library's path
 (`GET_GAME_INFO(PLID, GINFO_REALDLL_FULLPATH)`), finds the export in the already loaded library
 (`dlopen(RTLD_NOLOAD)` + `dlsym` on Linux; `GetModuleHandleA` + `GetProcAddress` on Windows,
-retrying with the bare file name) and calls it with `TSRS_PluginApi004` (version 4,
-the-specialistsmod-rs#117 and #99). The name carries the version and versions aren't compatible, so a
-server with another version answers NULL; a table whose `version` isn't 4 or whose `size` is
+retrying with the bare file name) and calls it with `TSRS_PluginApi005` (version 5,
+tsmod-amxx-rs#8, #10 and #15, the-specialistsmod-rs#197). The name carries the version and versions aren't compatible, so a
+server with another version answers NULL; a table whose `version` isn't 5 or whose `size` is
 smaller than this build's `PluginApi` is refused too (`amxx::tsapi::find`). The lookup runs at `AMXX_PluginsLoaded`
 and again at each `ServerActivate` until it succeeds; a server without the API gets one warning
 in the AMX Mod X log.
 
-tsx and hamsandwich both need version 4; the modules use none of version 3's additions (bots,
+tsx and hamsandwich both need version 5; the modules use none of version 3's additions (bots,
 entity info, host services) or version 4's (team scores, objectives, entity creation), only the
-player functions and the entity hooks, whose version 4 additions hamsandwich passes through
-(section 8: the gun's functions, the queries, `Ham_TS_GiveSlowMul`'s float).
+player functions, the entity hooks (whose version 4 additions hamsandwich passes through, section
+8: the gun's functions, the queries, `Ham_TS_GiveSlowMul`'s float) and version 5's:
+
+* **The listener** (`ffi/listener.rs`): tsx registers a `Plugin` descriptor with
+  `add_listener` once it finds the API (removed at `AMXX_Detach`), with four callbacks:
+  `player_stunt` fires `client_stunt(id, stunttype)`, `player_powerup` fires
+  `client_powerup(id, powerup)`, `melee_attack` fires `Melee_Attack(id, Float:time,
+  Float:damage)` (`forwards.rs`), and `kill_scored` finishes the death half of `TSHealth`
+  (section 4). tsfun.inc declares the three forwards "UNAVAILABLE IN 1.70": no module fired them
+  since TS 2.x. `stunttype` is tsconst.inc's `STUNT_ROLL` 2, `STUNT_DIVE` 3, `STUNT_GETUP` 4 or
+  `STUNT_FLIP` 5, or 6 (wall jump) / 7 (wall climb), TS 3.0 stunts 2.x lacked; TS 3.0's
+  `TSState` only says stand / crouch / prone, so the server reports the moves themselves.
+  `client_powerup` fires when a held power-up is used and when one that works at once is picked
+  up (health, armour, kung fu, superjump, grenade). `Melee_Attack` runs before a kung-fu move
+  lands, with its delay and damage; `ts_set_fuattack(id, time, damage)` (commented out in
+  tsfun.inc, a native again) changes them during the forward (1, else 0), and `PLUGIN_HANDLED`
+  (the forward is `ET_STOP`) blocks the move. The repository's patched `include/tsfun.inc` drops
+  the forwards' dummy `UNAVAILABLE` parameter and declares the native; tsx passes a 4th cell of 0,
+  so plugins built against the stock file work too. Floats go as cells holding their bits.
 
 Contract (`ts-plugin-api` docs and the port's `docs/implementation/plugin-api.md`): entity
 indices, engine thread only; `player_info` returns a snapshot refreshed each frame, so a getter
@@ -131,9 +149,21 @@ The kill's weapon, and so its kung-fu-ness, comes from TS itself: `PlayerKilled`
 `DeathMsg` just before `Killed` sends the victim's `TSHealth` 0, so tsx keeps it per victim and
 the death half reads it. For a kill by the killer's own hand, "Kung Fu" (a close-combat hit,
 also with a gun in hand) and "world" (kung fu outside one) are kung fu, and a weapon name is
-that weapon (`<name> Stock`, a pistol-whip, is the gun). The plugin API (version 4) reports
-neither the weapon nor kung fu for a kill. `ts_getuserlastfrag` is the change in `pev->frags`,
-as upstream's corrected value was.
+that weapon (`<name> Stock`, a pistol-whip, is the gun). `ts_getuserlastfrag` is the change in
+`pev->frags`, as upstream's corrected value was.
+
+With the plugin API's kill reports (version 5, `kill_scored`; #15, the-specialistsmod-rs#197) tsx
+uses the server's scoring instead: the death half of a `TSHealth` 0 waits for the report of that
+death (`State::after_damage`, `kill_scored`, `player.pending_death`), which carries the killer
+(the victim for a suicide, 0 for no player: both self kills), the frags it got, its spree, the
+tags (diving, sliding, double kill, killed specialist) and the `DeathMsg` name. The server may
+score a kill after the victim's `TSHealth` 0 (`PlayerKilled` deferred while the killer is out of
+reach), when neither the frags nor the `DeathMsg` are there yet: the prediction made such a kill
+a suicide and gave its frags to the killer's next kill. The report comes before the engine's next
+callback; a death without one (a death the rules don't score, a teamplay team change) gets the
+prediction above at the victim's next `PlayerPreThink` (`State::flush_death`), and a report
+without a `TSHealth` 0 (a death without damage) is dropped, as upstream fired no `client_death`
+then. The prediction stays the model for servers without the API.
 
 Weapon ids (`weapons.rs`): TS 3.0's by default (wire ids 1-37, kung fu 38, thrown knife 29),
 upstream's with `tsx_legacy_weaponids 1` (kung fu 36, thrown knife 37, shared with the Contender
@@ -211,13 +241,22 @@ Differences:
 * `ts_setuserammo` (port addition): `tsxaddon.inc`'s private-data function as a native, through
   the API's `set_weapon_ammo`; the repository ships the patched `include/tsxaddon.inc`. With
   TS 3.0's ids it also takes 36 and 37 (the Contender G2 and Akimbo Skorpions).
+* `client_stunt`, `client_powerup` and `Melee_Attack` fire (port addition; upstream declares
+  them unavailable since 1.70), from the server's plugin API (section 3), and `ts_set_fuattack`
+  is a native again. The repository ships a patched `include/tsfun.inc` for them. The stunt
+  types 6 and 7 (wall jump, wall climb) are the port's.
+* With the API, the death half of `TSHealth` uses the server's report of each scored kill
+  (section 4) instead of predicting it, so a kill the server scores after the victim's
+  `TSHealth` 0 is no longer a suicide (#15).
 
 ## 7. Testing
 
 * Unit tests (`cargo xtask test`, host and i686): the ABI layouts (i686 only), module info and
   version checks, the weapon table, rank file round trips including the upstream-format
   fixture, message parsing through the port's encoders, the damage/death logic, and every
-  native against `FakeArgs` and `FakeGame`.
+  native against `FakeArgs` and `FakeGame`; the tsfun forwards and `ts_set_fuattack`
+  (`forwards.rs`), and the reported death half in both orders and without a report
+  (`state_tests.rs`).
 * `cargo xtask e2e [linux] [win]`: see AGENTS.md. On 2026-10-12, against the port at `14999e6`
   (API version 2), both ReHLDS roots (Linux and Windows under Wine) passed all 19 tsx checks and
   all 10 hamsandwich checks; against a build without the API, the 13 tsx checks that apply
@@ -292,7 +331,7 @@ as for any other. One deviation from stock: the port's `Ham_TS_GiveSlowMul` retu
 `ExecuteHam` writes the result to an out parameter if the plugin passes one (a stock-compiled call
 without one still runs).
 
-**Without API version 4** the module loads, logs one warning and registers its natives;
+**Without API version 5** the module loads, logs one warning and registers its natives;
 `IsHamValid` is 0 and `RegisterHam`/`ExecuteHam` fail through `__fatal_ham_error` as stock does
 for functions missing from its gamedata.
 

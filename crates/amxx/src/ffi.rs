@@ -30,6 +30,7 @@ pub const AMX_ERR_NATIVE: c_int = 10;
 
 /// `ForwardExecType` / `ForwardParam` (amxxmodule.h).
 pub const ET_IGNORE: c_int = 0;
+pub const ET_STOP: c_int = 1;
 pub const FP_DONE: c_int = -1;
 pub const FP_CELL: c_int = 0;
 pub const FP_STRING: c_int = 2;

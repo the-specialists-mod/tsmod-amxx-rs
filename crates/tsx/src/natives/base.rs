@@ -402,6 +402,15 @@ pub fn ts_setup(_g: &dyn Game, a: &mut dyn Args) -> Cell {
     1
 }
 
+/// `ts_set_fuattack(id, Float:time, Float:damage)` (tsfun.inc, commented out there: "Alters a fu
+/// attack. Use with fu forward"). Port addition: changes the move of the `Melee_Attack` forward
+/// running for `id` (`crate::forwards`); 1 if one is, else 0.
+pub fn set_fuattack(g: &dyn Game, a: &mut dyn Args) -> Cell {
+    let Some(id) = super::player(g, a, "Player {} is not valid") else { return 0 };
+    let (time, damage) = (a.float(2), a.float(3));
+    crate::forwards::set_fuattack(id as i32, time, damage) as Cell
+}
+
 /// `register_statsfwd(ftype)`: forwards are always registered.
 pub fn register_forward(_g: &dyn Game, _a: &mut dyn Args) -> Cell {
     1

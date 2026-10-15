@@ -22,6 +22,9 @@ new g_last_killer;
 new bool:g_api;
 new g_give_id;
 new g_set_id;
+// tsfun.inc's forwards, fired from the server's plugin API v5 (tsmod-amxx-rs#8).
+new g_stunts, g_stunt_bad, g_pwups, g_pwup_id, g_pwup_last, g_melees, g_melee_bad, g_fuattack_ok;
+new g_pwup_target;
 
 check(const name[], ok, const detail[] = "")
 {
@@ -42,6 +45,7 @@ public plugin_init()
 	set_task(21.0, "t_getters");
 	set_task(25.0, "t_give");
 	set_task(26.5, "t_give_check");
+	set_task(30.0, "t_pwup");
 	set_task(50.0, "t_stats");
 	set_task(51.0, "t_finish");
 }
@@ -63,6 +67,32 @@ public client_death(killer, victim, wpnindex, hitplace, TK)
 	if (g_death <= 5)
 		log_to_file(LOG, "client_death: killer=%d victim=%d wpn=%d (%s) hit=%d tk=%d lastfrag=%d flags=%d",
 			killer, victim, wpnindex, name, hitplace, TK, ts_getuserlastfrag(killer), ts_getuserkillflags(killer));
+}
+
+public client_stunt(id, stunttype)
+{
+	g_stunts++;
+	// STUNT_ROLL..STUNT_FLIP, and the port's 6 (wall jump) and 7 (wall climb).
+	if (id < 1 || id > get_maxplayers() || stunttype < 2 || stunttype > 7) g_stunt_bad++;
+	if (g_stunts <= 3) log_to_file(LOG, "client_stunt: id=%d type=%d", id, stunttype);
+}
+
+public client_powerup(id, powerup)
+{
+	g_pwups++;
+	g_pwup_id = id;
+	g_pwup_last = powerup;
+	if (g_pwups <= 3) log_to_file(LOG, "client_powerup: id=%d powerup=%d", id, powerup);
+}
+
+public Melee_Attack(id, Float:time, Float:damage)
+{
+	g_melees++;
+	if (id < 1 || id > get_maxplayers() || time <= 0.0 || damage <= 0.0) g_melee_bad++;
+	// Changing nothing, through the native: 1 while the forward runs for that player.
+	if (ts_set_fuattack(id, time, damage) == 1) g_fuattack_ok++;
+	if (g_melees <= 3) log_to_file(LOG, "Melee_Attack: id=%d time=%.2f damage=%.1f", id, time, damage);
+	return PLUGIN_CONTINUE;
 }
 
 first_alive()
@@ -89,6 +119,27 @@ public t_static()
 	check("is_melee", xmod_is_melee_wpn(34) == 1 && xmod_is_melee_wpn(13) == 0);
 	new id = custom_weapon_add("E2E Laser", 0, "e2e_laser");
 	check("custom_weapon_add", id >= 39 && xmod_is_custom_wpn(id) == 1);
+	check("set_fuattack_outside", ts_set_fuattack(1, 1.0, 1.0) == 0, "no Melee_Attack running");
+}
+
+// A health power-up works at pickup: client_powerup(id, TSPWUP_HEALTH).
+public t_pwup()
+{
+	if (!g_api) { skip("client_powerup", "no plugin API"); return; }
+	g_pwup_target = first_alive();
+	if (!g_pwup_target) { skip("client_powerup", "no living player"); return; }
+	new ent = ts_createpwup(TSPWUP_HEALTH);
+	if (!ent) { check("client_powerup", 0, "ts_createpwup failed"); return; }
+	g_pwup_id = 0;
+	ts_givepwup(g_pwup_target, ent);
+	set_task(0.3, "t_pwup_check");
+}
+
+public t_pwup_check()
+{
+	new d[64];
+	formatex(d, charsmax(d), "target=%d id=%d powerup=%d", g_pwup_target, g_pwup_id, g_pwup_last);
+	check("client_powerup", g_pwup_id == g_pwup_target && g_pwup_last == TSPWUP_HEALTH, d);
 }
 
 public t_getters()
@@ -205,6 +256,17 @@ public t_stats()
 	new d[160];
 	formatex(d, charsmax(d), "client_damage=%d client_death=%d (named weapon %d)", g_damage, g_death, g_death_named);
 	check("forwards", g_death > 0 && g_damage > 0 && g_death_named == g_death, d);
+
+	// The bots' own stunts and kung fu: not every run has them.
+	formatex(d, charsmax(d), "client_stunt=%d (bad %d) Melee_Attack=%d (bad %d, set_fuattack ok %d) client_powerup=%d",
+		g_stunts, g_stunt_bad, g_melees, g_melee_bad, g_fuattack_ok, g_pwups);
+	log_to_file(LOG, "v5 forwards: %s", d);
+	if (!g_api) skip("client_stunt", "no plugin API");
+	else if (!g_stunts) skip("client_stunt", "no stunt in this run");
+	else check("client_stunt", g_stunt_bad == 0, d);
+	if (!g_api) skip("melee_attack", "no plugin API");
+	else if (!g_melees) skip("melee_attack", "no kung-fu move in this run");
+	else check("melee_attack", g_melee_bad == 0 && g_fuattack_ok == g_melees, d);
 
 	new stats[8], body[8], n = get_statsnum();
 	new ranked, wstats, vstats, rstats;

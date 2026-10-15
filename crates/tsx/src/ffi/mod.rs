@@ -8,6 +8,7 @@
 
 mod game;
 mod hooks;
+mod listener;
 
 use crate::natives::{base, stats};
 use crate::state::with;
@@ -17,7 +18,7 @@ use amxx::meta::MetaDef;
 use amxx::module::{ModuleDef, nothing};
 use amxx::native::Args;
 use core::sync::atomic::Ordering;
-use game::{FWD_DAMAGE, FWD_DEATH, RealGame};
+use game::{FWD_DAMAGE, FWD_DEATH, FWD_MELEE, FWD_POWERUP, FWD_STUNT, RealGame};
 
 const VERSION: &core::ffi::CStr = match core::ffi::CStr::from_bytes_with_nul(concat!(env!("CARGO_PKG_VERSION"), "\0").as_bytes()) {
     Ok(v) => v,
@@ -121,15 +122,26 @@ fn amxx_detach() {
         s.rank.clear();
         s.rank.set_calc(None);
     });
+    // Port addition: the server mustn't call into the library once it is unloaded.
+    listener::unregister(game::api_table());
 }
 
-/// `OnPluginsLoaded`: the two forwards; then the plugin API.
+/// `OnPluginsLoaded`: the two forwards, and (port addition) tsfun.inc's `client_stunt`,
+/// `client_powerup` and `Melee_Attack` (`crate::forwards`; floats as cells holding their bits,
+/// `Melee_Attack` stopping at the first `PLUGIN_HANDLED`, each with stock tsfun.inc's 4th
+/// `UNAVAILABLE` parameter as 0); then the plugin API.
 fn plugins_loaded() {
-    if let Some(f) = amxx::core::register_forward(c"client_damage", 6) {
-        FWD_DAMAGE.store(f.0, Ordering::Relaxed);
-    }
-    if let Some(f) = amxx::core::register_forward(c"client_death", 5) {
-        FWD_DEATH.store(f.0, Ordering::Relaxed);
+    let forwards = [
+        (&FWD_DAMAGE, amxx::core::register_forward(c"client_damage", 6)),
+        (&FWD_DEATH, amxx::core::register_forward(c"client_death", 5)),
+        (&FWD_STUNT, amxx::core::register_forward(c"client_stunt", 3)),
+        (&FWD_POWERUP, amxx::core::register_forward(c"client_powerup", 3)),
+        (&FWD_MELEE, amxx::core::register_forward_stop(c"Melee_Attack", 4)),
+    ];
+    for (id, f) in forwards {
+        if let Some(f) = f {
+            id.store(f.0, Ordering::Relaxed);
+        }
     }
     check_api();
 }
@@ -210,6 +222,7 @@ bind! {
     n_force_powerup_run => base::force_powerup_run,
     n_get_user_weapon => base::get_user_weapon,
     n_set_user_ammo => base::set_user_ammo,
+    n_set_fuattack => base::set_fuattack,
     n_get_stats => stats::get_stats,
     n_get_statsnum => stats::get_statsnum,
     n_get_user_astats => stats::get_user_astats,
@@ -281,6 +294,8 @@ amxx::natives! {
         c"get_user_weapon" => n_get_user_weapon,
         // Port addition: tsxaddon.inc's function, now a native (include/tsxaddon.inc).
         c"ts_setuserammo" => n_set_user_ammo,
+        // Port addition: tsfun.inc's commented-out native for `Melee_Attack` (`crate::forwards`).
+        c"ts_set_fuattack" => n_set_fuattack,
     ];
 }
 
@@ -296,8 +311,9 @@ mod tests {
             // SAFETY: the table's names are `'static` C string literals.
             .map(|n| unsafe { core::ffi::CStr::from_ptr(n.name) }.to_string_lossy().into())
             .collect();
-        // 13 in stats_Natives and 39 in base_Natives (NRank.cpp, NBase.cpp), plus ts_setuserammo.
-        assert_eq!(names.len(), 53);
+        // 13 in stats_Natives and 39 in base_Natives (NRank.cpp, NBase.cpp), plus ts_setuserammo
+        // and ts_set_fuattack.
+        assert_eq!(names.len(), 54);
         let mut sorted = names.clone();
         sorted.sort();
         sorted.dedup();

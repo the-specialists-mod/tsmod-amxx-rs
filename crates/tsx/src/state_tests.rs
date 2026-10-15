@@ -2,6 +2,7 @@
 
 //! Message parsing and the damage/death logic, fed by the port's own encoders.
 
+use crate::forwards::KillReport;
 use crate::game::{Event, Game};
 use crate::msgs::Kind;
 use crate::player::{ITEM_KUNGFU, ITEM_SUPERJUMP, KF_DOUBLEKILL, KF_ISSPEC, KF_KILLEDSPEC, KF_SLIDINGKILL, KF_STUNTKILL};
@@ -10,6 +11,7 @@ use crate::testing::{FakeGame, Feed, register_all};
 use shared::protocol::hud_wire::{PwUp, TsCash, TsHealth, TsPAward, TsSpace, TsState};
 use shared::protocol::rules::{DeathMsg, ScoreInfo};
 use shared::protocol::weapons::{WStatus, WeaponInfo};
+use ts_plugin_api::kill;
 
 fn setup() -> (State, FakeGame) {
     let mut s = State::default();
@@ -175,6 +177,78 @@ fn kill(s: &mut State, g: &FakeGame, killer: i32, victim: i32, frags: i32, weapo
         }
         ref other => panic!("no kill: {other:?}"),
     }
+}
+
+/// The victim's `TSHealth` 0 (with the killer as inflictor); returns the forwards it fired.
+fn ts_health_zero(s: &mut State, g: &FakeGame, killer: i32, victim: i32) -> Vec<Event> {
+    g.edit(victim, |e| {
+        e.inflictor = Some(killer);
+        e.dmg_take = 100.0;
+        e.alive = false;
+    });
+    let before = g.fired.borrow().len();
+    Feed::send(s, g, Kind::TsHealth, Some(victim), |f| TsHealth { hp: 0 }.write(f));
+    g.fired.borrow()[before..].to_vec()
+}
+
+fn report(killer: i32, victim: i32, points: i32, tags: i32, spree: i32, weapon: &str) -> KillReport {
+    KillReport { killer, victim, points, tags, killer_spree: spree, weapon_name: weapon.to_owned() }
+}
+
+/// Port addition (#15): with the server's kill reports (plugin API version 5), a kill it scores
+/// after the victim's `TSHealth` 0 (a deferred `PlayerKilled`: frags and `DeathMsg` not yet
+/// there) is the killer's, with the report's frags, spree and flags.
+#[test]
+fn a_kill_reported_after_tshealth_is_the_killers() {
+    let (mut s, g) = setup_n(3);
+    s.kill_reports = true;
+    s.players[1].current = 13;
+    g.time.set(50.0);
+    let fired = ts_health_zero(&mut s, &g, 1, 2);
+    assert!(matches!(fired[..], [Event::Damage { attacker: 1, victim: 2, .. }]), "client_death waits: {fired:?}");
+    g.edit(1, |e| e.frags += 2);
+    let death = s.kill_scored(&g, report(1, 2, 2, kill::DIVING, 1, "AK47"));
+    assert_eq!(death, Some(Event::Death { killer: 1, victim: 2, weapon: 13, aim: 0, tk: 0 }));
+    let k = &s.players[1];
+    assert_eq!((k.last_frag, k.kill_flags, k.killing_spree, k.frags, k.last_kill), (2, KF_STUNTKILL, 1, 2, 50.0));
+    assert_eq!((k.life.kills, s.players[2].life.deaths), (1, 1));
+    // The weapon is the DeathMsg name's: a stock hit with the gun in hand, kung fu.
+    let fired = ts_health_zero(&mut s, &g, 1, 3);
+    assert_eq!(fired.len(), 1);
+    let death = s.kill_scored(&g, report(1, 3, 4, kill::DOUBLE_KILL | kill::KUNG_FU, 2, "Kung Fu"));
+    assert!(matches!(death, Some(Event::Death { killer: 1, victim: 3, weapon: 38, .. })), "{death:?}");
+    assert_eq!((s.players[1].kill_flags, s.players[1].last_kill), (KF_DOUBLEKILL, 0.0));
+}
+
+/// A report before the `TSHealth` 0 waits for it; a suicide or a death by no player is a self
+/// kill.
+#[test]
+fn a_report_before_tshealth_waits_for_it() {
+    let (mut s, g) = setup_n(3);
+    s.kill_reports = true;
+    assert_eq!(s.kill_scored(&g, report(1, 2, 1, 0, 1, "AK47")), None);
+    let fired = ts_health_zero(&mut s, &g, 1, 2);
+    assert!(matches!(fired[..], [Event::Damage { .. }, Event::Death { killer: 1, victim: 2, .. }]), "{fired:?}");
+    // A grenade of the victim's own: the report names the victim.
+    ts_health_zero(&mut s, &g, 3, 3);
+    let death = s.kill_scored(&g, report(3, 3, 0, 0, 0, "M61 Grenade"));
+    assert!(matches!(death, Some(Event::Death { killer: 3, victim: 3, .. })), "{death:?}");
+}
+
+/// A death the server doesn't score (no report) gets the prediction at the victim's next
+/// PreThink; a report without a `TSHealth` 0 is dropped there.
+#[test]
+fn an_unreported_death_is_predicted_at_the_next_prethink() {
+    let (mut s, g) = setup_n(3);
+    s.kill_reports = true;
+    ts_health_zero(&mut s, &g, 1, 2);
+    assert_eq!(s.flush_death(&g, 1), None, "not the victim");
+    let death = s.flush_death(&g, 2);
+    assert!(matches!(death, Some(Event::Death { killer: 2, victim: 2, .. })), "no frags: a self kill {death:?}");
+    assert_eq!(s.flush_death(&g, 2), None, "once");
+    assert_eq!(s.kill_scored(&g, report(1, 3, 1, 0, 1, "AK47")), None);
+    assert_eq!(s.flush_death(&g, 3), None);
+    assert!(s.players[3].pending_kill.is_none());
 }
 
 #[test]

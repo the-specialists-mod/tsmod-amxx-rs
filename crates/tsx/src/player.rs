@@ -76,6 +76,11 @@ pub struct Player {
     pub kill_flags: i32,
     /// This player's last death's `DeathMsg`, until the death half of `TSHealth` takes it.
     pub death_notice: Option<DeathNotice>,
+    /// Port addition, with the server's kill reports (`crate::forwards::KillReport`): this
+    /// player's death as `TSHealth` 0 showed it, waiting for the report, or the report waiting
+    /// for the `TSHealth` 0 (`State::after_damage`, `State::kill_scored`).
+    pub pending_death: Option<crate::state::Hit>,
+    pub pending_kill: Option<crate::forwards::KillReport>,
     pub last_frag: i32,
     pub last_kill: f32,
     /// tsx's own frag count, compared with `pev->frags` to check its kill bookkeeping.
@@ -114,6 +119,8 @@ impl Player {
             is_specialist: false,
             kill_flags: 0,
             death_notice: None,
+            pending_death: None,
+            pending_kill: None,
             last_frag: 0,
             last_kill: 0.0,
             frags: 0,

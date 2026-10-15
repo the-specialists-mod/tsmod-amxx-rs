@@ -18,11 +18,15 @@ use ts_plugin_api::PluginApi;
 /// Forward ids (`client_damage`, `client_death`), -1 before `AMXX_PluginsLoaded`.
 pub static FWD_DAMAGE: AtomicI32 = AtomicI32::new(-1);
 pub static FWD_DEATH: AtomicI32 = AtomicI32::new(-1);
+/// Port addition: tsfun.inc's `client_stunt`, `client_powerup`, `Melee_Attack` (`crate::forwards`).
+pub static FWD_STUNT: AtomicI32 = AtomicI32::new(-1);
+pub static FWD_POWERUP: AtomicI32 = AtomicI32::new(-1);
+pub static FWD_MELEE: AtomicI32 = AtomicI32::new(-1);
 
 static API: AtomicPtr<PluginApi> = AtomicPtr::new(core::ptr::null_mut());
 
 /// The plugin API table, once [`find_api`] found it.
-fn api_table() -> Option<&'static PluginApi> {
+pub fn api_table() -> Option<&'static PluginApi> {
     // SAFETY: NULL or the server's static table (`find_api` checked its version and size), which
     // lives as long as the game library.
     unsafe { API.load(Ordering::Relaxed).as_ref() }
@@ -35,6 +39,7 @@ pub fn find_api() -> Result<(), String> {
     }
     let t = amxx::tsapi::find()?;
     API.store(t as *const PluginApi as *mut PluginApi, Ordering::Relaxed);
+    super::listener::register(t);
     Ok(())
 }
 
@@ -233,14 +238,18 @@ impl Game for RealGame {
         }
     }
 
-    fn fire(&self, event: Event) {
+    fn fire(&self, event: Event) -> i32 {
+        // Floats go as cells holding their bits (`ExecuteForward` reads `FP_FLOAT` as a double).
+        let bits = |f: f32| f.to_bits() as i32;
         let (fwd, cells) = match event {
             Event::Damage { attacker, victim, damage, weapon, aim, ta } => (&FWD_DAMAGE, vec![attacker, victim, damage, weapon, aim, ta]),
             Event::Death { killer, victim, weapon, aim, tk } => (&FWD_DEATH, vec![killer, victim, weapon, aim, tk]),
+            // Stock tsfun.inc declares a 4th parameter, UNAVAILABLE: 0 for plugins built with it.
+            Event::Stunt { player, stunt } => (&FWD_STUNT, vec![player, stunt, 0]),
+            Event::Powerup { player, powerup } => (&FWD_POWERUP, vec![player, powerup, 0]),
+            Event::MeleeAttack { player, time, damage } => (&FWD_MELEE, vec![player, bits(time), bits(damage), 0]),
         };
         let id = fwd.load(Ordering::Relaxed);
-        if id >= 0 {
-            amxx::core::execute_forward(Forward(id), &cells);
-        }
+        if id >= 0 { amxx::core::execute_forward(Forward(id), &cells) } else { 0 }
     }
 }

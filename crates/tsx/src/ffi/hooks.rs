@@ -129,6 +129,11 @@ extern "C" fn server_activate_post(_list: *mut edict_t, _count: c_int, _max: c_i
 
 extern "C" fn player_pre_think_post(e: *mut edict_t) {
     if let Some(i) = index(e) {
+        let g = RealGame::new();
+        // Port addition: a death the server didn't report gets the prediction now.
+        if let Some(Some(death)) = with(|s| s.flush_death(&g, i)) {
+            g.fire(death);
+        }
         on_state(|s, g| s.pre_think(g, i));
     }
     meta::ignored();

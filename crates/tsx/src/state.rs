@@ -9,6 +9,7 @@
 //! call this module's natives, so no borrow is held across such a call: hooks and natives take
 //! the state in short [`with`] sections and run forwards and game calls outside them.
 
+use crate::forwards::KillReport;
 use crate::game::{Event, Game};
 use crate::msgs::Messages;
 use crate::player::{self, Player};
@@ -34,6 +35,12 @@ pub struct State {
     pub fire_events: Vec<u16>,
     /// Natives that already logged an API problem (no API, a rejected value).
     pub api_warned: Vec<String>,
+    /// The kung-fu move of the `Melee_Attack` forward running now (port addition,
+    /// `crate::forwards`).
+    pub melee: Option<crate::forwards::MeleeAttack>,
+    /// The server reports each death it scores (plugin API version 5, `kill_scored`; port
+    /// addition): the death half of `TSHealth` waits for the report instead of predicting.
+    pub kill_reports: bool,
 }
 
 impl Default for State {
@@ -48,6 +55,8 @@ impl Default for State {
             knife_offset: 0,
             fire_events: Vec::new(),
             api_warned: Vec::new(),
+            melee: None,
+            kill_reports: false,
         }
     }
 }
@@ -375,11 +384,103 @@ impl State {
     /// [`player::DeathNotice`]): "Kung Fu" or "world" is kung fu, a named weapon that weapon.
     /// Upstream relabelled every kill whose frags it mispredicted as kung fu; tsx does so only
     /// without a `DeathMsg`, and only when a close-combat kung-fu frag explains the frags exactly.
+    ///
+    /// Port addition (#15): when the server reports the deaths it scores (plugin API version 5,
+    /// [`State::kill_reports`]), the death waits for its report ([`State::kill_scored`]), which
+    /// tells the killer, the frags and the tags: the server may score a kill after this `TSHealth`
+    /// 0 (a killer out of reach), when the frags and the `DeathMsg` haven't happened yet. A death
+    /// the rules don't score gets the prediction at the victim's next PreThink
+    /// ([`State::flush_death`]).
     pub fn after_damage(&mut self, g: &dyn Game, hit: Hit) -> Option<Event> {
-        let Hit { mut attacker, victim, mut weapon, aim, ta, by, .. } = hit;
-        if g.is_alive(victim as i32) {
+        if g.is_alive(hit.victim as i32) {
             return None;
         }
+        if !self.kill_reports {
+            return self.predict_death(g, hit);
+        }
+        let v = &mut self.players[hit.victim];
+        match v.pending_kill.take() {
+            Some(k) => self.reported_death(g, hit, &k),
+            None => {
+                v.pending_death = Some(hit);
+                None
+            }
+        }
+    }
+
+    /// The server scored a death ([`crate::forwards::KillReport`]): the death half of the
+    /// victim's `TSHealth` 0 if that came first, else the report waits for it.
+    pub fn kill_scored(&mut self, g: &dyn Game, k: KillReport) -> Option<Event> {
+        let v = slot(self, k.victim)?;
+        match self.players[v].pending_death.take() {
+            Some(hit) => self.reported_death(g, hit, &k),
+            None => {
+                self.players[v].pending_kill = Some(k);
+                None
+            }
+        }
+    }
+
+    /// The victim's PlayerPreThink after a death: every report has come by then (the server
+    /// sends it before the engine's next callback). A death without one (rules that don't score
+    /// it, such as a teamplay team change) gets the prediction; a report without a `TSHealth` 0
+    /// (a death without damage) is dropped, as upstream fired no `client_death` without one.
+    pub fn flush_death(&mut self, g: &dyn Game, victim: i32) -> Option<Event> {
+        let v = slot(self, victim)?;
+        self.players[v].pending_kill = None;
+        let hit = self.players[v].pending_death.take()?;
+        self.predict_death(g, hit)
+    }
+
+    /// The death half from the server's report: its killer (a suicide or a death by no player
+    /// is a self kill), the weapon its `DeathMsg` name gives a kill by the killer's own hand, its
+    /// frags, spree and tags for the kill flags.
+    fn reported_death(&mut self, g: &dyn Game, hit: Hit, k: &KillReport) -> Option<Event> {
+        use ts_plugin_api::kill;
+        let Hit { victim, mut weapon, aim, ta, by, .. } = hit;
+        self.players[victim].death_notice = None;
+        let attacker = slot(self, k.killer).filter(|&a| a != victim).unwrap_or(victim);
+        let mut kill_flags = 0;
+        if attacker != victim {
+            let now = g.time();
+            if ta == 0 && by == Inflictor::Player {
+                weapon = self.death_msg_weapon(&k.weapon_name).unwrap_or(weapon);
+            }
+            let a = &mut self.players[attacker];
+            a.frags = g.frags(attacker as i32);
+            a.killing_spree = k.killer_spree;
+            a.is_specialist = k.killer_spree > scoring::SPECIALIST_SPREE;
+            if ta == 0 {
+                for (bit, flag) in [
+                    (kill::DIVING, player::KF_STUNTKILL),
+                    (kill::SLIDING, player::KF_SLIDINGKILL),
+                    (kill::DOUBLE_KILL, player::KF_DOUBLEKILL),
+                    (kill::KILLED_SPECIALIST, player::KF_KILLEDSPEC),
+                ] {
+                    if k.tags & bit != 0 {
+                        kill_flags |= flag;
+                    }
+                }
+                if a.is_specialist {
+                    kill_flags |= player::KF_ISSPEC;
+                }
+                if k.points > 0 {
+                    a.last_kill = if k.tags & kill::DOUBLE_KILL != 0 { 0.0 } else { now };
+                }
+                a.last_frag = k.points;
+            }
+        }
+        self.players[attacker].kill_flags = kill_flags;
+        if !ignore_bots(self, g, attacker, Some(victim)) {
+            player::save_kill(&mut self.players, attacker, victim, weapon, (aim == 1) as i32, ta);
+        }
+        Some(Event::Death { killer: attacker as i32, victim: victim as i32, weapon: weapon as i32, aim, tk: ta })
+    }
+
+    /// The death half without the server's report: the kill predicted from the frags,
+    /// `DeathMsg` and TS 3.0's scoring ([`crate::scoring`]).
+    fn predict_death(&mut self, g: &dyn Game, hit: Hit) -> Option<Event> {
+        let Hit { mut attacker, victim, mut weapon, aim, ta, by, .. } = hit;
         let notice = self.players[victim].death_notice.take().filter(|n| n.killer == attacker as i32);
         // No frag for the attacker (e.g. a grenade's owner killed themselves): self kill.
         if g.frags(attacker as i32) - self.players[attacker].frags == 0 {
