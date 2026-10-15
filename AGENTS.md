@@ -76,12 +76,17 @@ from the port's `dist/`, so rerun it after a new port build (`cargo xtask --rele
 xtask installs the release modules (hamsandwich under the stock module's file name) and
 `e2e/*.sma` (compiled with that env's `amxxpc`, with `include/` first) into the root, starts a
 4-bot server on `ts_dojo` with the env's `run.sh`, waits for each plugin's `DONE` line in
-`ts/addons/amxmodx/logs/<plugin>.log`, stops it with `stop.sh`, and fails on any
-`CHECK ... FAIL`, a module missing from `amxx modules`, or a `[TSX]`/`[HAMSANDWICH]` line in the
-AMX Mod X error log other than the intended ones (the unknown-class error and ham_e2e's
-`ExecuteHamB(Ham_Use)` refused at the server's 8-deep nesting limit). `ham_e2e` skips its checks when
-the server lacks the entity hooks. It refuses to start while a server runs in that root. Overrides:
-`AMXX_TESTENV`, `AMXX_SCRIPTING`, `AMXX_LINUX_ROOT`, `AMXX_WIN_ROOT`, `E2E_TIMEOUT`.
+`ts/addons/amxmodx/logs/<plugin>.log`, then runs the stats round trip: upstream's
+`tsstats.sma` is the score plugin (`data/tsstats.amxx`), a `changelevel` saves `tsstats.dat`
+(`ServerDeactivate`), which must equal the rank `tsx_e2e` dumps on the next map; `quit`, and a
+bot-less restart with `e2e/tsstats_score_e2e.sma` as the score plugin must load the same entries
+in its reversed order. It fails on any `CHECK ... FAIL`, a stats mismatch, a module missing from
+`amxx modules`, or a `[TSX]`/`[HAMSANDWICH]` line in the AMX Mod X error log other than the
+intended ones (the unknown-class error and ham_e2e's `ExecuteHamB(Ham_Use)` refused at the
+server's 8-deep nesting limit). `ham_e2e` skips its checks when the server lacks the entity
+hooks. It refuses to start while a server runs in that root. Overrides: `AMXX_TESTENV`,
+`AMXX_SCRIPTING`, `AMXX_TSSTATS_SMA`, `AMXX_LINUX_ROOT`, `AMXX_WIN_ROOT`, `E2E_TIMEOUT`;
+`E2E_NO_STATS=1` skips the round trip (stops with `stop.sh`).
 
 Before calling a change done: `cargo fmt`, `cargo xtask test`, `cargo xtask lint`, and
 `cargo xtask e2e linux win` for anything that touches hooks, natives or exports. When exports
@@ -114,8 +119,10 @@ change, compare `nm -D --defined-only` / `objdump -p`.
 - **Bot AI switches weapons by itself**: the e2e weapon check re-issues `weapon_13` and looks
   again.
 - **amxxpc** needs its own directory on `LD_LIBRARY_PATH`. `state` is a Pawn keyword.
-- **`stop.sh` kills the server**, so `ServerDeactivate` (which saves `tsstats.dat`) doesn't run
-  at the end of an e2e run: "Could not load stats file" on the next start is expected.
+- **How a server stops decides whether `tsstats.dat` is saved**: `changelevel` and `quit` run
+  `ServerDeactivate` (on both roots); `stop.sh`'s SIGTERM does on Linux (ReHLDS shuts down) but
+  not under Wine. xtask installs no rank file, so "Could not load stats file" on the match's start
+  is expected.
 - **Stopping servers**: use the testenv's `stop.sh` (name + cwd match), never `pkill -f`.
 - **`ExecuteForward` reads `FP_FLOAT` varargs as doubles.** hamsandwich registers float
   parameters as `FP_CELL` and passes the float's bits, so every vararg is cell-sized.

@@ -201,6 +201,14 @@ Differences:
   for all eleven fields) and the server's nesting limit (a `Ham_Use` pre forward re-running
   `ExecuteHamB(Ham_Use)`: 8 pre and 8 post calls, then BUSY with one native error, the error xtask
   expects, and the server's `hooks nested 8 deep` line).
+* Stats round trip (#4), same day and setup, both roots: with upstream's `tsstats.amxx` as the
+  score plugin (it loaded: no "Couldn't load plugin" line), `changelevel` saved a 4-entry
+  `tsstats.dat` (346 bytes) equal, entry for entry and in order, to the rank `get_stats` showed on
+  the next map, ordered by kills - deaths - team kills; `quit` ended the server and saved it again
+  (8 entries: the second map's bots). A restart without bots and with `tsstats_score_e2e.amxx`
+  (deaths - kills) loaded all 8 entries with the same counters and body hits, in the reversed
+  order, so `get_score` ran through `LoadAmxScript`. stop.sh's SIGTERM also saves on Linux
+  (ReHLDS shuts down cleanly), not under Wine.
 
 ## 8. Ham Sandwich
 

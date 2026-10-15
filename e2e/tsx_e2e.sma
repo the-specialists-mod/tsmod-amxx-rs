@@ -38,12 +38,45 @@ public plugin_init()
 {
 	register_plugin("tsx_e2e", "1.0", "tsmod-amxx-rs");
 	log_to_file(LOG, "start: maxplayers=%d", get_maxplayers());
+	// xtask's stats round trip: `tsx_e2e_dump <tag>` over rcon, or localinfo tsx_e2e_dump set
+	// before a changelevel (the rank right after ServerDeactivate saved it).
+	register_srvcmd("tsx_e2e_dump", "cmd_dump");
+	new tag[16];
+	get_localinfo("tsx_e2e_dump", tag, charsmax(tag));
+	if (tag[0]) {
+		set_localinfo("tsx_e2e_dump", "");
+		dump_rank(tag);
+	}
 	set_task(20.0, "t_static");
 	set_task(21.0, "t_getters");
 	set_task(25.0, "t_give");
 	set_task(26.5, "t_give_check");
 	set_task(50.0, "t_stats");
 	set_task(51.0, "t_finish");
+}
+
+public cmd_dump()
+{
+	new tag[16];
+	read_argv(1, tag, charsmax(tag));
+	dump_rank(tag);
+	return PLUGIN_HANDLED;
+}
+
+// The whole rank through get_stats, best first: "RANK <tag> <pos> <stats 0..6> <body 1..7> | <name>".
+dump_rank(const tag[])
+{
+	new stats[8], body[8], name[32], i, n, next;
+	do {
+		name[0] = 0;
+		next = get_stats(i, stats, body, name, charsmax(name));
+		if (!name[0]) break;
+		log_to_file(LOG, "RANK %s %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d | %s", tag, i, stats[0], stats[1], stats[2], stats[3],
+			stats[4], stats[5], stats[6], body[1], body[2], body[3], body[4], body[5], body[6], body[7], name);
+		n++;
+		i = next;
+	} while (next);
+	log_to_file(LOG, "DUMPED %s n=%d statsnum=%d", tag, n, get_statsnum());
 }
 
 public client_damage(attacker, victim, damage, wpnindex, hitplace, TA)
