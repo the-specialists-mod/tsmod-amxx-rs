@@ -55,7 +55,9 @@ include/        tsxaddon.inc, patched (ts_setuserammo is a tsx native)
 Requirements: Rust stable with `i686-unknown-linux-gnu` and `i686-pc-windows-gnu`, clang ≥ 18,
 32-bit glibc/libgcc, MinGW-w64, and `../xash3d-fwgs` (with `3rdparty/library_suffix`) or
 `FWGS_DIR`: `goldsrc-sys` (a git dependency on the port) generates its bindings from the FWGS
-headers. `.cargo/config.toml` sets `FWGS_DIR` to `../xash3d-fwgs` unless the environment has it.
+headers. `.cargo/config.toml` sets `FWGS_DIR` to `../xash3d-fwgs` unless the environment has it;
+xtask instead looks for `xash3d-fwgs` next to the checkout or any ancestor, so `cargo xtask` also
+works from a worktree under `.claude/worktrees/` (plain `cargo` there needs `FWGS_DIR`).
 
 ```sh
 cargo xtask test                 # unit tests, host and i686 (i686 runs the ABI layout tests)

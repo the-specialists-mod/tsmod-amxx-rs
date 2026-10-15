@@ -10,7 +10,8 @@
 //!                            ts_dojo, then the plugin's checks (default: linux)
 //! ```
 //!
-//! Environment: `FWGS_DIR` (FWGS headers, default `../xash3d-fwgs` via .cargo/config.toml),
+//! Environment: `FWGS_DIR` (FWGS headers, default: `xash3d-fwgs` next to the checkout or one of its
+//! ancestors, so git worktrees under `.claude/worktrees/` find it too; an `FWGS_DIR` without the headers is ignored),
 //! `AMXX_TESTENV` (default `~/dev/hl/ref/amxx-testenv`), `AMXX_SCRIPTING` (amxxpc's directory),
 //! `AMXX_LINUX_ROOT` / `AMXX_WIN_ROOT` (default `~/games/amxx_rehlds_{linux,win}`),
 //! `E2E_TIMEOUT` (seconds to wait for the plugin, default 150).
@@ -65,9 +66,25 @@ fn run(cmd: &mut Command) -> Result<(), String> {
     if st.success() { Ok(()) } else { Err(format!("{cmd:?} failed: {st}")) }
 }
 
+fn is_fwgs(dir: &Path) -> bool {
+    dir.join("common/xash3d_types.h").is_file()
+}
+
+/// `xash3d-fwgs` next to the checkout or the nearest ancestor that has one. `.cargo/config.toml`'s
+/// fixed `../xash3d-fwgs` misses it from a worktree nested in the checkout, and cargo hands that
+/// value to xtask too, so `FWGS_DIR` only wins when it holds the FWGS headers.
+fn fwgs_dir() -> Option<PathBuf> {
+    root().ancestors().skip(1).map(|d| d.join("xash3d-fwgs")).find(|p| is_fwgs(p))
+}
+
 fn cargo() -> Command {
     let mut c = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
     c.current_dir(root());
+    if !std::env::var_os("FWGS_DIR").is_some_and(|d| is_fwgs(Path::new(&d)))
+        && let Some(dir) = fwgs_dir()
+    {
+        c.env("FWGS_DIR", dir);
+    }
     c
 }
 
