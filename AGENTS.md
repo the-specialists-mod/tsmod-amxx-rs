@@ -77,7 +77,8 @@ xtask installs the release modules (hamsandwich under the stock module's file na
 4-bot server on `ts_dojo` with the env's `run.sh`, waits for each plugin's `DONE` line in
 `ts/addons/amxmodx/logs/<plugin>.log`, stops it with `stop.sh`, and fails on any
 `CHECK ... FAIL`, a module missing from `amxx modules`, or a `[TSX]`/`[HAMSANDWICH]` line in the
-AMX Mod X error log other than the intended unknown-class error. `ham_e2e` skips its checks when
+AMX Mod X error log other than the intended ones (the unknown-class error and ham_e2e's
+`ExecuteHamB(Ham_Use)` refused at the server's 8-deep nesting limit). `ham_e2e` skips its checks when
 the server lacks the entity hooks. It refuses to start while a server runs in that root. Overrides:
 `AMXX_TESTENV`, `AMXX_SCRIPTING`, `AMXX_LINUX_ROOT`, `AMXX_WIN_ROOT`, `E2E_TIMEOUT`.
 

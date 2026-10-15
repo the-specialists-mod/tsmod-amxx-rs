@@ -170,6 +170,17 @@ Differences:
   (API version 2), both ReHLDS roots (Linux and Windows under Wine) passed all 19 tsx checks and
   all 10 hamsandwich checks; against a build without the API, the 13 tsx checks that apply
   passed, the setters returned 0 with one log line each, and hamsandwich skipped.
+* 2026-10-16, port `38cd7b8` (API version 4), ReHLDS 3.15 + Metamod-R 1.3 + AMX Mod X 1.10, both
+  roots: 19 tsx and 20 hamsandwich checks pass. New hamsandwich checks (#6): `Ham_TraceAttack`'s
+  TraceResult (an `ExecuteHamB` with a `create_tr2` trace whose hit group the pre forward changes
+  from chest to left arm with `set_tr2`, which the post forward sees; and the game's own bullet
+  traces, whose `pHit` is the victim and whose hit group the pre forward moves to the stomach,
+  every post forward seeing it), `Ham_Keyvalue` on a `trigger_relay` through `DispatchKeyValue`
+  (`get_kvd` class/key/value in pre; `fHandled` 1 for its class key `delay`, 0 for an unknown key,
+  1 when a pre forward sets it and supersedes), the ItemInfo natives (`Create`/`Set`/`Get`/`Free`
+  for all eleven fields) and the server's nesting limit (a `Ham_Use` pre forward re-running
+  `ExecuteHamB(Ham_Use)`: 8 pre and 8 post calls, then BUSY with one native error, the error xtask
+  expects, and the server's `hooks nested 8 deep` line).
 
 ## 8. Ham Sandwich
 
@@ -221,7 +232,7 @@ string until the next one).
 `this` and entity arguments, a null TraceResult refused; `ham_execute` with `run_hooks` 0 or 1;
 pointer arguments written back; Float/Vector results into the next by-reference parameter, Str
 into a buffer and length, others returned. Errors from the server (BUSY: the entity is inside
-one of its own functions) are native errors.
+one of its own functions, or the hooks already nest `ham::MAX_DEPTH` = 8 deep) are native errors.
 
 **ItemInfo**: handles are `ItemInfo *`, as stock. The module accepts only those it created or
 that a call in progress passed, so a bad handle is a native error instead of a crash.
@@ -251,4 +262,5 @@ protocol): parameter changes, supercede and the last-result return rule, overrid
 type errors, ItemInfo, pdata. `e2e/ham_e2e.sma` hooks Spawn, TakeDamage (pre and post), Killed,
 Touch and Think on a live server and checks health after halved and superceded damage; on a
 version 4 server also `Ham_Item_PreFrame` on `weapon_tsgun` (a player owner) and
-`Ham_TS_GiveSlowMul`'s float in a post hook.
+`Ham_TS_GiveSlowMul`'s float in a post hook. It also covers TraceAttack's TraceResult, Keyvalue's
+KeyValueData, the ItemInfo natives and the 8-deep nesting limit (section 7).

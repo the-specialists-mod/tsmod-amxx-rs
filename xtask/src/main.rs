@@ -218,8 +218,9 @@ const PLUGINS: [&str; 2] = ["tsx_e2e", "ham_e2e"];
 /// The modules `amxx modules` must list as running.
 const MODULE_NAMES: [&str; 3] = ["TSX", "TSFun Wrapper", "Ham Sandwich"];
 
-/// Native errors the e2e plugins cause on purpose (a hook on an unknown class).
-const EXPECTED_ERRORS: [&str; 1] = ["no_such_class_e2e"];
+/// Native errors the e2e plugins cause on purpose: a hook on an unknown class, and ham_e2e's
+/// `ExecuteHamB(Ham_Use)` that the server refuses (BUSY) at its hook nesting limit.
+const EXPECTED_ERRORS: [&str; 2] = ["no_such_class_e2e", "; use didn't run."];
 
 fn compile_plugin(scripting: &Path, name: &str, out: &Path) -> Result<(), String> {
     let sma = root().join(format!("e2e/{name}.sma"));

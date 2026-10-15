@@ -229,7 +229,8 @@ fn execute(host: &dyn Host, a: &mut dyn Args, run_hooks: bool) -> Cell {
             return 0;
         }
         Err(api::BUSY) => {
-            a.error(&format!("Entity {this} is busy (inside one of its own functions); {} didn't run.", e.name));
+            // The server answers BUSY for both: it doesn't say which.
+            a.error(&format!("Entity {this} is busy (inside one of its own functions, or hooks nested too deep); {} didn't run.", e.name));
             return 0;
         }
         Err(api::UNSUPPORTED) => {

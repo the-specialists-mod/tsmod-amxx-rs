@@ -1,12 +1,15 @@
 // tsmod-amxx-rs end-to-end test plugin for hamsandwich (cargo xtask e2e).
 // GPL-3.0-or-later with the AMX Mod X exceptions.
 //
-// Hooks Ham_Spawn, Ham_TakeDamage (pre and post), Ham_Killed, Ham_Touch on players and
-// Ham_Think on an entity, then checks the effects through game state (health), and writes
-// "CHECK <name> PASS|FAIL|SKIP <detail>" lines and "DONE ..." to addons/amxmodx/logs/ham_e2e.log.
+// Hooks Ham_Spawn, Ham_TakeDamage (pre and post), Ham_Killed, Ham_Touch, Ham_TraceAttack on
+// players and Ham_Think, Ham_Keyvalue, Ham_Use on entities, then checks the effects through game
+// state (health, the trace, the KeyValueData), the ItemInfo natives and the server's hook nesting
+// limit, and writes "CHECK <name> PASS|FAIL|SKIP <detail>" lines and "DONE ..." to
+// addons/amxmodx/logs/ham_e2e.log.
 #include <amxmodx>
 #include <fun>
 #include <engine>
+#include <fakemeta>
 #include <hamsandwich>
 
 new const LOG[] = "ham_e2e.log";
@@ -21,6 +24,15 @@ new g_think_ent;
 // Plugin API v4 (the-specialistsmod-rs#99): the gun's functions on weapon_tsgun and the queries.
 new g_preframes, g_preframe_bad, g_slowmul;
 new Float:g_slowmul_ret = -1.0;
+// Ham_TraceAttack: the TraceResult handle (fakemeta get_tr2/set_tr2).
+new g_ta_pre, g_ta_post, g_ta_mode; // mode 1: ExecuteHamB on g_target, 2: the game's traces
+new g_ta_seen_group, g_ta_post_group;
+new g_ta_forced, g_ta_forced_ok, g_ta_forced_bad, g_ta_hit_self, g_ta_expect;
+// Ham_Keyvalue: the KeyValueData pointer (fakemeta get_kvd/set_kvd).
+new g_kv_ent, g_kv_pre, g_kv_post, g_kv_handled = -1, g_kv_supercede;
+new g_kv_class[32], g_kv_key[32], g_kv_value[32];
+// The server's hook nesting limit (ham::MAX_DEPTH = 8): Ham_Use re-running itself.
+new g_nest_ent, g_nest_depth, g_nest_max, g_nest_pre, g_nest_post;
 
 check(const name[], ok, const detail[] = "")
 {
@@ -60,9 +72,17 @@ public plugin_init()
 		RegisterHam(Ham_Item_PreFrame, "weapon_tsgun", "fw_preframe");
 		RegisterHam(Ham_TS_GiveSlowMul, "player", "fw_slowmul_post", 1);
 	}
+	RegisterHam(Ham_TraceAttack, "player", "fw_ta_pre");
+	RegisterHam(Ham_TraceAttack, "player", "fw_ta_post", 1);
 	set_task(15.0, "t_valid");
 	set_task(20.0, "t_damage");
 	set_task(22.0, "t_think_setup");
+	set_task(23.0, "t_trace");
+	set_task(24.0, "t_keyvalue");
+	set_task(25.0, "t_iteminfo");
+	set_task(26.0, "t_nesting");
+	set_task(27.0, "t_trace_game_on");
+	set_task(45.0, "t_trace_game_off");
 	set_task(50.0, "t_events");
 	set_task(51.0, "t_finish");
 }
@@ -182,6 +202,196 @@ public t_think_setup()
 	entity_set_float(g_think_ent, EV_FL_nextthink, get_gametime() + 0.5);
 }
 
+// ---- Ham_TraceAttack ----
+
+// HIT_* (amxconst.inc).
+#define E2E_HIT_CHEST 2
+#define E2E_HIT_STOMACH 3
+#define E2E_HIT_LEFTARM 4
+
+public fw_ta_pre(victim, attacker, Float:damage, Float:dir[3], tr, bits)
+{
+	g_ta_pre++;
+	if (g_ta_mode == 1 && victim == g_target) {
+		g_ta_seen_group = get_tr2(tr, TR_iHitgroup);
+		set_tr2(tr, TR_iHitgroup, E2E_HIT_LEFTARM);
+		g_ta_expect = E2E_HIT_LEFTARM;
+		return HAM_HANDLED;
+	}
+	// The game's own traces: pHit is the victim; move every hit to the stomach.
+	if (g_ta_mode == 2) {
+		if (get_tr2(tr, TR_pHit) == victim) g_ta_hit_self++;
+		set_tr2(tr, TR_iHitgroup, E2E_HIT_STOMACH);
+		g_ta_forced++;
+		g_ta_expect = E2E_HIT_STOMACH;
+		return HAM_HANDLED;
+	}
+	return HAM_IGNORED;
+}
+
+// The post forward sees the arguments as the function got them: the pre forward's hit group.
+public fw_ta_post(victim, attacker, Float:damage, Float:dir[3], tr, bits)
+{
+	g_ta_post++;
+	if (!g_ta_expect) return HAM_IGNORED;
+	new group = get_tr2(tr, TR_iHitgroup);
+	if (g_ta_mode == 1) g_ta_post_group = group;
+	if (g_ta_mode == 2) {
+		if (group == g_ta_expect) g_ta_forced_ok++; else g_ta_forced_bad++;
+	}
+	g_ta_expect = 0;
+	return HAM_IGNORED;
+}
+
+public t_trace()
+{
+	new id = first_alive(), d[160];
+	if (!id) { skip("traceattack_execute", "no living player"); return; }
+	new Float:org[3], Float:dir[3] = {0.0, 0.0, -1.0};
+	entity_get_vector(id, EV_VEC_origin, org);
+	new tr = create_tr2();
+	set_tr2(tr, TR_flFraction, 0.5);
+	set_tr2(tr, TR_vecEndPos, org);
+	set_tr2(tr, TR_pHit, id);
+	set_tr2(tr, TR_iHitgroup, E2E_HIT_CHEST);
+	g_target = id;
+	g_ta_mode = 1;
+	new pre_before = g_ta_pre;
+	ExecuteHamB(Ham_TraceAttack, id, 0, 1.0, dir, tr, DMG_BULLET);
+	g_ta_mode = 0;
+	g_target = 0;
+	formatex(d, charsmax(d), "id=%d pre=%d seen_group=%d post_group=%d", id, g_ta_pre - pre_before, g_ta_seen_group, g_ta_post_group);
+	check("traceattack_execute", g_ta_pre - pre_before == 1 && g_ta_seen_group == E2E_HIT_CHEST && g_ta_post_group == E2E_HIT_LEFTARM, d);
+	free_tr2(tr);
+}
+
+public t_trace_game_on() { g_ta_mode = 2; }
+public t_trace_game_off() { g_ta_mode = 0; g_ta_expect = 0; }
+
+// ---- Ham_Keyvalue ----
+
+public fw_kv_pre(ent, kvd)
+{
+	if (ent != g_kv_ent) return HAM_IGNORED;
+	g_kv_pre++;
+	get_kvd(kvd, KV_ClassName, g_kv_class, charsmax(g_kv_class));
+	get_kvd(kvd, KV_KeyName, g_kv_key, charsmax(g_kv_key));
+	get_kvd(kvd, KV_Value, g_kv_value, charsmax(g_kv_value));
+	if (g_kv_supercede) {
+		// A superseding hook decides fHandled.
+		set_kvd(kvd, KV_fHandled, 1);
+		return HAM_SUPERCEDE;
+	}
+	return HAM_IGNORED;
+}
+
+public fw_kv_post(ent, kvd)
+{
+	if (ent != g_kv_ent) return HAM_IGNORED;
+	g_kv_post++;
+	g_kv_handled = get_kvd(kvd, KV_fHandled);
+	return HAM_IGNORED;
+}
+
+kv_case(const name[], const key[], const value[], handled)
+{
+	new d[192];
+	g_kv_pre = 0; g_kv_post = 0; g_kv_handled = -1;
+	g_kv_class[0] = g_kv_key[0] = g_kv_value[0] = 0;
+	DispatchKeyValue(g_kv_ent, key, value);
+	formatex(d, charsmax(d), "pre=%d post=%d class=%s key=%s value=%s fHandled=%d", g_kv_pre, g_kv_post, g_kv_class, g_kv_key, g_kv_value, g_kv_handled);
+	check(name, g_kv_pre == 1 && g_kv_post == 1 && equal(g_kv_class, "trigger_relay") && equal(g_kv_key, key) && equal(g_kv_value, value)
+		&& g_kv_handled == handled, d);
+}
+
+public t_keyvalue()
+{
+	// trigger_relay is a CBaseDelay: its class part handles "delay". Entvars keys never reach
+	// Ham_Keyvalue (DispatchKeyValue's entvars parser takes them first).
+	g_kv_ent = create_entity("trigger_relay");
+	if (!g_kv_ent) { skip("keyvalue", "create_entity(trigger_relay) failed"); return; }
+	RegisterHamFromEntity(Ham_Keyvalue, g_kv_ent, "fw_kv_pre");
+	RegisterHamFromEntity(Ham_Keyvalue, g_kv_ent, "fw_kv_post", 1);
+	kv_case("keyvalue_class_key", "delay", "2.5", 1);
+	kv_case("keyvalue_unknown_key", "e2e_key", "e2e_value", 0);
+	g_kv_supercede = 1;
+	kv_case("keyvalue_supercede", "e2e_key2", "x", 1);
+	g_kv_supercede = 0;
+	remove_entity(g_kv_ent);
+	g_kv_ent = 0;
+}
+
+// ---- ItemInfo ----
+
+public t_iteminfo()
+{
+	new h = CreateHamItemInfo(), d[192];
+	if (!h) { check("iteminfo_roundtrip", 0, "CreateHamItemInfo returned 0"); return; }
+	SetHamItemInfo(h, Ham_ItemInfo_iSlot, 3);
+	SetHamItemInfo(h, Ham_ItemInfo_iPosition, 4);
+	SetHamItemInfo(h, Ham_ItemInfo_pszAmmo1, "e2e_ammo1");
+	SetHamItemInfo(h, Ham_ItemInfo_iMaxAmmo1, 120);
+	SetHamItemInfo(h, Ham_ItemInfo_pszAmmo2, "e2e_ammo2");
+	SetHamItemInfo(h, Ham_ItemInfo_iMaxAmmo2, 5);
+	SetHamItemInfo(h, Ham_ItemInfo_pszName, "weapon_e2e");
+	SetHamItemInfo(h, Ham_ItemInfo_iMaxClip, 30);
+	SetHamItemInfo(h, Ham_ItemInfo_iId, 17);
+	SetHamItemInfo(h, Ham_ItemInfo_iFlags, 24);
+	SetHamItemInfo(h, Ham_ItemInfo_iWeight, 9);
+	new a1[32], a2[32], name[32];
+	GetHamItemInfo(h, Ham_ItemInfo_pszAmmo1, a1, charsmax(a1));
+	GetHamItemInfo(h, Ham_ItemInfo_pszAmmo2, a2, charsmax(a2));
+	GetHamItemInfo(h, Ham_ItemInfo_pszName, name, charsmax(name));
+	new slot = GetHamItemInfo(h, Ham_ItemInfo_iSlot), pos = GetHamItemInfo(h, Ham_ItemInfo_iPosition);
+	new m1 = GetHamItemInfo(h, Ham_ItemInfo_iMaxAmmo1), m2 = GetHamItemInfo(h, Ham_ItemInfo_iMaxAmmo2);
+	new clip = GetHamItemInfo(h, Ham_ItemInfo_iMaxClip), iid = GetHamItemInfo(h, Ham_ItemInfo_iId);
+	new flags = GetHamItemInfo(h, Ham_ItemInfo_iFlags), weight = GetHamItemInfo(h, Ham_ItemInfo_iWeight);
+	formatex(d, charsmax(d), "slot=%d pos=%d ammo1=%s/%d ammo2=%s/%d name=%s clip=%d id=%d flags=%d weight=%d",
+		slot, pos, a1, m1, a2, m2, name, clip, iid, flags, weight);
+	check("iteminfo_roundtrip", slot == 3 && pos == 4 && equal(a1, "e2e_ammo1") && m1 == 120 && equal(a2, "e2e_ammo2") && m2 == 5
+		&& equal(name, "weapon_e2e") && clip == 30 && iid == 17 && flags == 24 && weight == 9, d);
+	new f1 = FreeHamItemInfo(h), f2 = FreeHamItemInfo(h);
+	formatex(d, charsmax(d), "free=%d free_again=%d", f1, f2);
+	check("iteminfo_free", f1 == 1 && f2 == 0, d);
+}
+
+// ---- The nesting limit ----
+
+// Each Use pre forward re-runs Use with its hooks. The server refuses the call that would nest
+// a ninth hook call with BUSY: ExecuteHamB raises a native error (the intended "busy" line in
+// the AMXX error log) and that innermost forward stops there.
+public fw_nest_pre(ent, caller, activator, use_type, Float:value)
+{
+	if (ent != g_nest_ent) return HAM_IGNORED;
+	g_nest_pre++;
+	g_nest_depth++;
+	if (g_nest_depth > g_nest_max) g_nest_max = g_nest_depth;
+	if (g_nest_depth < 20)
+		ExecuteHamB(Ham_Use, ent, caller, activator, use_type, value);
+	g_nest_depth--;
+	return HAM_IGNORED;
+}
+
+public fw_nest_post(ent, caller, activator, use_type, Float:value)
+{
+	if (ent == g_nest_ent) g_nest_post++;
+	return HAM_IGNORED;
+}
+
+public t_nesting()
+{
+	g_nest_ent = create_entity("info_target");
+	if (!g_nest_ent) { skip("nesting_limit", "create_entity(info_target) failed"); return; }
+	RegisterHamFromEntity(Ham_Use, g_nest_ent, "fw_nest_pre");
+	RegisterHamFromEntity(Ham_Use, g_nest_ent, "fw_nest_post", 1);
+	ExecuteHamB(Ham_Use, g_nest_ent, 0, 0, 1, 1.0);
+	new d[96];
+	formatex(d, charsmax(d), "pre=%d post=%d max_depth=%d", g_nest_pre, g_nest_post, g_nest_max);
+	check("nesting_limit", g_nest_pre == 8 && g_nest_post == 8 && g_nest_max == 8, d);
+	remove_entity(g_nest_ent);
+	g_nest_ent = 0;
+}
+
 public t_events()
 {
 	new d[160];
@@ -193,6 +403,9 @@ public t_events()
 	check("takedamage_by_game", g_td_pre > 3 && g_td_post > 3, d);
 	if (g_think_ent)
 		check("think", g_thinks > 0, d);
+	formatex(d, charsmax(d), "pre=%d post=%d forced=%d post_saw_forced=%d post_saw_other=%d phit_is_victim=%d",
+		g_ta_pre, g_ta_post, g_ta_forced, g_ta_forced_ok, g_ta_forced_bad, g_ta_hit_self);
+	check("traceattack_game", g_ta_forced > 0 && g_ta_forced_ok > 0 && g_ta_forced_bad == 0 && g_ta_post == g_ta_pre && g_ta_hit_self > 0, d);
 	if (!IsHamValid(Ham_Item_PreFrame)) {
 		skip("gun_hooks", "the server has no plugin API v4 (Item_*/Weapon_* hooks)");
 		return;
