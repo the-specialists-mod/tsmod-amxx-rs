@@ -250,7 +250,7 @@ impl shared::protocol::hud_wire::Wire for Feed<'_> {
     fn coord(&mut self, v: f32) {
         self.s.message_float(v);
     }
-    fn string(&mut self, _s: &str) {
+    fn string(&mut self, _s: &[u8]) {
         self.s.message_string();
     }
 }
