@@ -473,7 +473,8 @@ public t_events()
 }
 
 // The mirror: a living player's m_pActiveItem points to its weapon_tsgun, whose m_pPlayer points back and
-// whose m_iId is 16; pev sits where TS's gamedata says (fakemeta's get_pdata_ent). A plugin's
+// whose m_iId is 16. (fakemeta's get_pdata_ent reads an edict_t*, so on a CBaseEntity* such as
+// m_pActiveItem it gives -2, as on stock HLDS: not checked.) A plugin's
 // write of a reserve is taken back by the game, a write of m_iId is overwritten.
 public t_pdata()
 {
@@ -490,13 +491,11 @@ public t_pdata()
 	entity_get_string(gun, EV_SZ_classname, class, charsmax(class));
 	new owner = get_pdata_cbase(gun, TSGUN_m_pPlayer, TSGUN_LINUX);
 	new safe = get_pdata_cbase_safe(id, m_pActiveItem);
-	new ent = get_pdata_ent(id, m_pActiveItem * 4, 20);
 	new iid = get_pdata_int(gun, TSGUN_m_iId, TSGUN_LINUX);
-	formatex(d, charsmax(d), "id=%d m_pActiveItem=%d (%s, owner %d) safe=%d get_pdata_ent=%d m_pPlayer=%d m_iId=%d", id, gun, class,
-		entity_get_edict(gun, EV_ENT_owner), safe, ent, owner, iid);
+	formatex(d, charsmax(d), "id=%d m_pActiveItem=%d (%s, owner %d) safe=%d m_pPlayer=%d m_iId=%d", id, gun, class,
+		entity_get_edict(gun, EV_ENT_owner), safe, owner, iid);
 	log_to_file(LOG, "pdata: %s", d);
 	check("pdata_cbase", equal(class, "weapon_tsgun") && entity_get_edict(gun, EV_ENT_owner) == id && safe == gun && owner == id, d);
-	check("pdata_ent_pev", ent == gun, d);
 	check("pdata_int_mirror", iid == 16, d);
 	// Writes: the reserve comes back from the game, m_iId is the game's again.
 	set_pdata_int(gun, TSGUN_reserve + PROBE_AMMO, 123, TSGUN_LINUX);

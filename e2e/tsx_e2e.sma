@@ -271,10 +271,23 @@ public t_pwup()
 	if (!g_api) { skip("client_powerup", "no plugin API"); return; }
 	g_pwup_target = first_alive();
 	if (!g_pwup_target) { skip("client_powerup", "no living player"); return; }
+	g_pwup_id = 0;
 	new ent = ts_createpwup(TSPWUP_HEALTH);
 	if (!ent) { check("client_powerup", 0, "ts_createpwup failed"); return; }
-	g_pwup_id = 0;
-	ts_givepwup(g_pwup_target, ent);
+	// "create_pwup -> !wait! -> give_pwup" (upstream): a ts_powerup takes touches only once it has
+	// landed, so drop it at the player's feet and give it a second later (if the player hasn't
+	// walked into it first, which fires the same forward).
+	new Float:o[3];
+	entity_get_vector(g_pwup_target, EV_VEC_origin, o);
+	entity_set_origin(ent, o);
+	new p[1]; p[0] = ent;
+	set_task(1.0, "t_pwup_give", 0, p, 1);
+}
+
+public t_pwup_give(const p[])
+{
+	if (!is_user_alive(g_pwup_target)) { skip("client_powerup", "player died"); return; }
+	if (is_valid_ent(p[0])) ts_givepwup(g_pwup_target, p[0]);
 	set_task(0.3, "t_pwup_check");
 }
 

@@ -408,7 +408,7 @@ pointer to nothing, the block's end, the server's link). `e2e/ham_e2e.sma` hooks
 TakeDamage (pre and post), Killed, Touch and Think on a live server and checks health after
 halved and superceded damage, `Ham_Item_PreFrame` on `weapon_tsgun` (a player owner),
 `Ham_TS_GiveSlowMul`'s float in a post hook, and the private-data mirror: `get_pdata_cbase` /
-`_safe` / fakemeta's `get_pdata_ent` of `m_pActiveItem` (the player's `weapon_tsgun`), its
+`_safe` of `m_pActiveItem` (the player's `weapon_tsgun`), its
 `m_pPlayer` back, `get_pdata_int` of its `m_iId` (16), a reserve written with `set_pdata_int`
 taken by the game and a written `m_iId` overwritten. It also covers TraceAttack's TraceResult,
 Keyvalue's KeyValueData, the ItemInfo natives and the 8-deep nesting limit (section 7).

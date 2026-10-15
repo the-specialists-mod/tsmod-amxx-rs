@@ -186,7 +186,7 @@ takes some writes back (the port's `docs/implementation/plugin-api.md` §4.1): `
 `m_pActiveItem` (its `weapon_tsgun`); the `weapon_tsgun`'s `m_pPlayer`, `m_iId` (16), `m_iClip`
 (written: the gun in hand's clip), current weapon id, reserve ammo per ammo type (written: taken
 into the game) and the 38 weapon records' owned / ammo type / fire mode, clip (written: taken) and
-attachments. So stock fakemeta's `get_pdata_int`/`set_pdata_int`/`get_pdata_ent` and this
+attachments. So stock fakemeta's `get_pdata_int`/`set_pdata_int` and this
 hamsandwich's `get_pdata_cbase` read them (values up to a frame old; a write takes effect within a
 frame). Other offsets read zeros (or what a plugin wrote) and their writes do nothing.
 

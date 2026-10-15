@@ -380,7 +380,8 @@ pub fn create_pwup(g: &dyn Game, a: &mut dyn Args) -> Cell {
     g.create_powerup(kind, origin)
 }
 
-/// `ts_givepwup(index, pwupent)`: after `ts_createpwup` (and a frame's wait).
+/// `ts_givepwup(index, pwupent)`: after `ts_createpwup` and once the power-up has landed (a
+/// `ts_powerup` takes touches only on the ground, as in TS 3.0).
 pub fn give_pwup(g: &dyn Game, a: &mut dyn Args) -> Cell {
     let ent = a.cell(2);
     if g.is_free(ent) || g.classname(ent) != "ts_powerup" {
