@@ -90,48 +90,49 @@ pub unsafe fn attach(def: &ModuleDef, req: Option<ReqFnptr>) -> c_int {
     AMXX_OK
 }
 
-/// Defines the `AMXX_*` exports for a `static` [`ModuleDef`].
+/// Defines the `AMXX_*` exports for a `static` [`ModuleDef`]. Each runs on a realigned stack
+/// ([`stack::aligned`](crate::stack::aligned)): older cores call in misaligned (#17).
 #[macro_export]
 macro_rules! export_module {
     ($def:path) => {
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn AMXX_Query(iface: *mut ::core::ffi::c_int, info: *mut $crate::ffi::ModuleInfo) -> ::core::ffi::c_int {
             // SAFETY: the core's arguments, passed through.
-            unsafe { $crate::module::query(&$def, iface, info) }
+            $crate::stack::aligned(|| unsafe { $crate::module::query(&$def, iface, info) })
         }
 
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn AMXX_CheckGame(game: *const ::core::ffi::c_char) -> ::core::ffi::c_int {
             // SAFETY: the core's argument, passed through.
-            unsafe { $crate::module::check_game(&$def, game) }
+            $crate::stack::aligned(|| unsafe { $crate::module::check_game(&$def, game) })
         }
 
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn AMXX_Attach(req: Option<$crate::ffi::ReqFnptr>) -> ::core::ffi::c_int {
             // SAFETY: the core's argument, passed through.
-            unsafe { $crate::module::attach(&$def, req) }
+            $crate::stack::aligned(|| unsafe { $crate::module::attach(&$def, req) })
         }
 
         #[unsafe(no_mangle)]
         pub extern "C" fn AMXX_Detach() -> ::core::ffi::c_int {
-            ($def.detach)();
+            $crate::stack::aligned(|| ($def.detach)());
             $crate::ffi::AMXX_OK
         }
 
         #[unsafe(no_mangle)]
         pub extern "C" fn AMXX_PluginsLoaded() -> ::core::ffi::c_int {
-            ($def.plugins_loaded)();
+            $crate::stack::aligned(|| ($def.plugins_loaded)());
             $crate::ffi::AMXX_OK
         }
 
         #[unsafe(no_mangle)]
         pub extern "C" fn AMXX_PluginsUnloading() {
-            ($def.plugins_unloading)()
+            $crate::stack::aligned(|| ($def.plugins_unloading)())
         }
 
         #[unsafe(no_mangle)]
         pub extern "C" fn AMXX_PluginsUnloaded() {
-            ($def.plugins_unloaded)()
+            $crate::stack::aligned(|| ($def.plugins_unloaded)())
         }
     };
 }

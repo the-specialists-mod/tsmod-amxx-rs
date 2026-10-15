@@ -14,7 +14,8 @@
 //! ancestors, so git worktrees under `.claude/worktrees/` find it too; an `FWGS_DIR` without the headers is ignored),
 //! `AMXX_TESTENV` (default `~/dev/hl/ref/amxx-testenv`), `AMXX_SCRIPTING` (amxxpc's directory),
 //! `AMXX_LINUX_ROOT` / `AMXX_WIN_ROOT` (default `~/games/amxx_rehlds_{linux,win}`),
-//! `E2E_TIMEOUT` (seconds to wait for the plugin, default 150).
+//! `AMXX_TSSTATS_SMA` (upstream's score plugin source), `E2E_TIMEOUT` (seconds to wait for the plugin, default
+//! 150), `E2E_NO_STATS` (skip the stats round trip).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -221,12 +222,24 @@ const PLUGINS: [&str; 2] = ["tsx_e2e", "ham_e2e"];
 /// The modules `amxx modules` must list as running.
 const MODULE_NAMES: [&str; 3] = ["TSX", "TSFun Wrapper", "Ham Sandwich"];
 
-/// Native errors the e2e plugins cause on purpose (a hook on an unknown class).
-const EXPECTED_ERRORS: [&str; 1] = ["no_such_class_e2e"];
+/// Native errors the e2e plugins cause on purpose: a hook on an unknown class, and ham_e2e's
+/// `ExecuteHamB(Ham_Use)` that the server refuses (BUSY) at its hook nesting limit.
+const EXPECTED_ERRORS: [&str; 2] = ["no_such_class_e2e", "; use didn't run."];
+
+/// The stats round trip's score plugins (`data/tsstats.amxx`): upstream's `tsstats.sma` for the
+/// match, and `e2e/tsstats_score_e2e.sma` (deaths - kills, the reverse order) for the reload.
+const SCORE_STOCK: &str = "tsstats";
+const SCORE_E2E: &str = "tsstats_score_e2e";
 
 fn compile_plugin(scripting: &Path, name: &str, out: &Path) -> Result<(), String> {
-    let sma = root().join(format!("e2e/{name}.sma"));
+    let sma = if name == SCORE_STOCK {
+        env_path("AMXX_TSSTATS_SMA", home().join("dev/hl/ref/amxmodx/plugins/ts/tsstats.sma"))
+    } else {
+        root().join(format!("e2e/{name}.sma"))
+    };
     std::fs::create_dir_all(out.parent().unwrap()).map_err(|e| e.to_string())?;
+    // AMX Mod X 1.8.2's amxxpc exits 0 after errors: only a fresh output file means success.
+    let _ = std::fs::remove_file(out);
     let mut c = Command::new(scripting.join("amxxpc"));
     // The repo's include/ first: its tsxaddon.inc declares the ts_setuserammo native, its
     // tsconst.inc has TS 3.0's weapon ids and its tsfun.inc the forwards tsx fires.
@@ -276,7 +289,232 @@ fn install(r: &Root) -> Result<(), String> {
         ensure_line(&amxx.join("configs/plugins.ini"), &format!("{name}.amxx debug"))?;
         let _ = std::fs::remove_file(amxx.join(format!("logs/{name}.log")));
     }
+    // The stats round trip starts from no rank file, with upstream's score plugin.
+    let _ = std::fs::remove_file(amxx.join("data/tsstats.dat"));
+    put_score_plugin(r, SCORE_STOCK)?;
     Ok(())
+}
+
+/// Installs `target/e2e/<name>.amxx` as tsx's score plugin (`tsstats_score`'s default path).
+fn put_score_plugin(r: &Root, name: &str) -> Result<(), String> {
+    let dest = r.dir.join("ts/addons/amxmodx/data/tsstats.amxx");
+    let _ = std::fs::remove_file(&dest);
+    std::fs::copy(plugin_path(name), &dest).map(|_| ()).map_err(|e| format!("{}: {e}", dest.display()))
+}
+
+/// A `tsstats.dat` entry, or a `RANK` line of tsx_e2e's dump: the name, `get_stats`'s seven
+/// counters (kills, deaths, headshots, team kills, shots, hits, damage) and body hits 1..=7.
+#[derive(Debug, Clone, PartialEq)]
+struct RankEntry {
+    name: String,
+    stats: [i32; 7],
+    body: [i32; 7],
+}
+
+/// Reads `tsstats.dat` (tsx's `rank.rs` / upstream's `saveRank`): `i16 version (5)`, then
+/// `i16 namelen; name; i16 uniquelen; unique; i32 kills, deaths, hs, tks, damage, hits, shots;
+/// i32 body[8]` per entry, up to an `i16 0`.
+fn read_rank_file(path: &Path) -> Result<Vec<RankEntry>, String> {
+    let b = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut at = 0usize;
+    let mut take = |n: usize| -> Result<&[u8], String> {
+        let s = b.get(at..at + n).ok_or_else(|| format!("{}: short file at byte {at}", path.display()))?;
+        at += n;
+        Ok(s)
+    };
+    let short = |s: &[u8]| i16::from_le_bytes([s[0], s[1]]);
+    let int = |s: &[u8]| i32::from_le_bytes([s[0], s[1], s[2], s[3]]);
+    let version = short(take(2)?);
+    if version != 5 {
+        return Err(format!("{}: version {version}, want 5", path.display()));
+    }
+    let mut out = Vec::new();
+    loop {
+        let n = short(take(2)?);
+        if n <= 0 {
+            break;
+        }
+        let name = String::from_utf8_lossy(take(n as usize)?).trim_end_matches('\0').to_owned();
+        let u = short(take(2)?);
+        take(u.max(0) as usize)?;
+        let mut c = [0i32; 7];
+        for v in &mut c {
+            *v = int(take(4)?);
+        }
+        let mut body = [0i32; 8];
+        for v in &mut body {
+            *v = int(take(4)?);
+        }
+        let [k, d, hs, tk, dmg, hits, shots] = c;
+        out.push(RankEntry { name, stats: [k, d, hs, tk, shots, hits, dmg], body: body[1..].try_into().unwrap() });
+    }
+    Ok(out)
+}
+
+/// The `RANK <tag> <pos> <7 stats> <7 body> | <name>` lines tsx_e2e's `tsx_e2e_dump <tag>`
+/// wrote, in rank order.
+fn read_rank_dump(log: &str, tag: &str) -> Vec<RankEntry> {
+    let prefix = format!("RANK {tag} ");
+    log.lines()
+        .filter_map(|l| l.split_once(": ").map(|(_, m)| m))
+        .filter_map(|m| m.strip_prefix(&prefix))
+        .filter_map(|m| {
+            let (nums, name) = m.split_once(" | ")?;
+            let v: Vec<i32> = nums.split_whitespace().skip(1).filter_map(|x| x.parse().ok()).collect();
+            (v.len() == 14).then(|| RankEntry {
+                name: name.to_owned(),
+                stats: v[..7].try_into().unwrap(),
+                body: v[7..].try_into().unwrap(),
+            })
+        })
+        .collect()
+}
+
+/// Waits until `cond` holds for the text of `file`.
+fn wait_for(file: &Path, timeout: Duration, cond: impl Fn(&str) -> bool) -> bool {
+    let t0 = Instant::now();
+    while t0.elapsed() < timeout {
+        if cond(&std::fs::read_to_string(file).unwrap_or_default()) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    false
+}
+
+/// The engine console log (`-condebug`): `ts/` on Linux, the root on Windows (ReHLDS).
+fn qconsole(r: &Root) -> PathBuf {
+    if r.os == "linux" { r.dir.join("ts/qconsole.log") } else { r.dir.join("qconsole.log") }
+}
+
+fn file_len(p: &Path) -> usize {
+    std::fs::read(p).map(|b| b.len()).unwrap_or(0)
+}
+
+/// The console text written since `from` bytes (the file may have been recreated: then all).
+fn console_since(r: &Root, from: usize) -> String {
+    let b = std::fs::read(qconsole(r)).unwrap_or_default();
+    String::from_utf8_lossy(b.get(from..).unwrap_or(&b)).into_owned()
+}
+
+/// Stops the server with `quit` over rcon, so the engine runs `ServerDeactivate`; `stop.sh`
+/// if it is still up after 20 s. Returns whether `quit` ended it.
+fn quit(r: &Root, testenv: &Path) -> bool {
+    rcon(testenv, r.port, "quit");
+    let t0 = Instant::now();
+    while running(r) && t0.elapsed() < Duration::from_secs(20) {
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    let clean = !running(r);
+    let _ = Command::new(testenv.join("stop.sh")).arg(r.os).status();
+    clean
+}
+
+/// The rank file round trip (#4), with the match's server still running: `changelevel` runs
+/// `ServerDeactivate`, which saves `tsstats.dat`; the next map's tsx_e2e dumps the rank (still in
+/// memory), which must equal the file, best first by upstream's `tsstats.amxx` score
+/// (kills - deaths - team kills). Then `quit`, and a new server without bots and with the
+/// reversing score plugin loads the file: its rank holds the same entries, now ordered by
+/// deaths - kills, which only `get_score` from `data/tsstats.amxx` can do.
+fn stats_round_trip(r: &Root, testenv: &Path, log: &Path, console_from: usize) -> Vec<String> {
+    let os = r.os;
+    let mut fails = Vec::new();
+    let dat = r.dir.join("ts/addons/amxmodx/data/tsstats.dat");
+    let starts = |t: &str| t.lines().filter(|l| l.contains(": start")).count();
+    let before = starts(&std::fs::read_to_string(log).unwrap_or_default());
+    let sorted_by = |v: &[RankEntry], score: fn(&RankEntry) -> i32| v.windows(2).all(|w| score(&w[0]) >= score(&w[1]));
+    let stock_score: fn(&RankEntry) -> i32 = |e| e.stats[0] - e.stats[1] - e.stats[3];
+    let reverse_score: fn(&RankEntry) -> i32 = |e| e.stats[1] - e.stats[0];
+
+    rcon(testenv, r.port, "localinfo tsx_e2e_dump saved");
+    rcon(testenv, r.port, "changelevel ts_dojo");
+    if !wait_for(log, Duration::from_secs(60), |t| t.contains("DUMPED saved")) {
+        fails.push(format!("{os}: stats: no rank dump after changelevel"));
+        quit(r, testenv);
+        return fails;
+    }
+    let dumped = read_rank_dump(&std::fs::read_to_string(log).unwrap_or_default(), "saved");
+    match read_rank_file(&dat) {
+        Err(e) => fails.push(format!("{os}: stats: changelevel saved no rank file: {e}")),
+        Ok(file) => {
+            println!(
+                "  stats: changelevel saved {} entries ({} bytes); the rank in memory has {}",
+                file.len(),
+                file_len(&dat),
+                dumped.len()
+            );
+            if file.is_empty() || file != dumped {
+                fails.push(format!("{os}: stats: tsstats.dat after changelevel != get_stats:\n    file {file:?}\n    rank {dumped:?}"));
+            }
+            if !sorted_by(&file, stock_score) {
+                fails.push(format!("{os}: stats: the saved rank isn't ordered by tsstats.amxx's kills - deaths - tks: {file:?}"));
+            }
+        }
+    }
+    let mtime = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let saved_at = mtime(&dat);
+    let clean = quit(r, testenv);
+    let resaved = mtime(&dat) != saved_at;
+    println!(
+        "  stats: quit {}; tsstats.dat {}",
+        if clean { "ended the server" } else { "didn't end the server (stop.sh)" },
+        if resaved { "saved again" } else { "not saved again" }
+    );
+    let console = console_since(r, console_from);
+    for l in console.lines().filter(|l| l.contains("[TSX]")) {
+        println!("  console: {l}");
+        if l.contains("Couldn't load plugin") {
+            fails.push(format!("{os}: stats: {l}"));
+        }
+    }
+    let file = match read_rank_file(&dat) {
+        Ok(f) => f,
+        Err(e) => {
+            fails.push(format!("{os}: stats: {e}"));
+            return fails;
+        }
+    };
+
+    // The reload: no bots, so the rank is the file's; the reversing score plugin.
+    if let Err(e) = put_score_plugin(r, SCORE_E2E) {
+        fails.push(format!("{os}: stats: {e}"));
+        return fails;
+    }
+    let console_from = file_len(&qconsole(r));
+    if let Err(e) = run(Command::new(testenv.join("run.sh")).args([os, "--map", "ts_dojo", "--bots", "0"])) {
+        fails.push(format!("{os}: stats: {e}"));
+        return fails;
+    }
+    if wait_for(log, Duration::from_secs(60), |t| starts(t) > before + 1) {
+        rcon(testenv, r.port, "tsx_e2e_dump loaded");
+    }
+    let ok = wait_for(log, Duration::from_secs(20), |t| t.contains("DUMPED loaded"));
+    quit(r, testenv);
+    let _ = std::fs::remove_file(r.dir.join("ts/addons/amxmodx/data/tsstats.amxx"));
+    if !ok {
+        fails.push(format!("{os}: stats: no rank dump after the restart"));
+        return fails;
+    }
+    let loaded = read_rank_dump(&std::fs::read_to_string(log).unwrap_or_default(), "loaded");
+    println!("  stats: the restarted server loaded {} entries", loaded.len());
+    let key = |v: &[RankEntry]| {
+        let mut v = v.to_vec();
+        v.sort_by(|a, b| a.name.cmp(&b.name));
+        v
+    };
+    if key(&loaded) != key(&file) {
+        fails.push(format!("{os}: stats: the loaded rank != tsstats.dat:\n    file {file:?}\n    rank {loaded:?}"));
+    }
+    if !sorted_by(&loaded, reverse_score) {
+        fails.push(format!("{os}: stats: the loaded rank isn't ordered by the e2e score plugin's deaths - kills: {loaded:?}"));
+    }
+    for l in console_since(r, console_from).lines().filter(|l| l.contains("[TSX]") || l.contains("stats file")) {
+        println!("  console: {l}");
+        if l.contains("Couldn't load plugin") {
+            fails.push(format!("{os}: stats: {l}"));
+        }
+    }
+    fails
 }
 
 fn rcon(testenv: &Path, port: u16, cmd: &str) -> String {
@@ -297,6 +535,7 @@ fn e2e_root(r: &Root, testenv: &Path) -> Result<Vec<String>, String> {
     install(r)?;
     let logs = r.dir.join("ts/addons/amxmodx/logs");
     let started = std::time::SystemTime::now();
+    let console_from = file_len(&qconsole(r));
     run(Command::new(testenv.join("run.sh")).args([r.os, "--map", "ts_dojo", "--bots", "4"]))?;
     let timeout = Duration::from_secs(std::env::var("E2E_TIMEOUT").ok().and_then(|v| v.parse().ok()).unwrap_or(150));
     let log_of = |name: &str| logs.join(format!("{name}.log"));
@@ -312,9 +551,15 @@ fn e2e_root(r: &Root, testenv: &Path) -> Result<Vec<String>, String> {
         }
         std::thread::sleep(Duration::from_secs(2));
     }
-    let _ = Command::new(testenv.join("stop.sh")).arg(r.os).status();
-
     let mut fails = Vec::new();
+    let done = PLUGINS.iter().all(|n| std::fs::read_to_string(log_of(n)).is_ok_and(|t| t.contains("DONE")));
+    let stats_fails = if done && std::env::var_os("E2E_NO_STATS").is_none() {
+        stats_round_trip(r, testenv, &log_of("tsx_e2e"), console_from)
+    } else {
+        let _ = Command::new(testenv.join("stop.sh")).arg(r.os).status();
+        Vec::new()
+    };
+
     for name in PLUGINS {
         let log = log_of(name);
         let text = std::fs::read_to_string(&log).unwrap_or_default();
@@ -369,6 +614,7 @@ fn e2e_root(r: &Root, testenv: &Path) -> Result<Vec<String>, String> {
             }
         }
     }
+    fails.extend(stats_fails);
     Ok(fails)
 }
 
@@ -380,7 +626,7 @@ fn e2e(names: &[String]) -> Result<(), String> {
     }
     let roots = roots(names)?;
     build(true)?;
-    for name in PLUGINS {
+    for name in PLUGINS.into_iter().chain([SCORE_STOCK, SCORE_E2E]) {
         compile_plugin(&scripting, name, &plugin_path(name))?;
     }
     let mut fails = Vec::new();

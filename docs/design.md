@@ -265,6 +265,53 @@ Differences:
   (API version 2), both ReHLDS roots (Linux and Windows under Wine) passed all 19 tsx checks and
   all 10 hamsandwich checks; against a build without the API, the 13 tsx checks that apply
   passed, the setters returned 0 with one log line each, and hamsandwich skipped.
+* 2026-10-16, port `38cd7b8` (API version 4), ReHLDS 3.15 + Metamod-R 1.3 + AMX Mod X 1.10, both
+  roots: 19 tsx and 20 hamsandwich checks pass. New hamsandwich checks (#6): `Ham_TraceAttack`'s
+  TraceResult (an `ExecuteHamB` with a `create_tr2` trace whose hit group the pre forward changes
+  from chest to left arm with `set_tr2`, which the post forward sees; and the game's own bullet
+  traces, whose `pHit` is the victim and whose hit group the pre forward moves to the stomach,
+  every post forward seeing it), `Ham_Keyvalue` on a `trigger_relay` through `DispatchKeyValue`
+  (`get_kvd` class/key/value in pre; `fHandled` 1 for its class key `delay`, 0 for an unknown key,
+  1 when a pre forward sets it and supersedes), the ItemInfo natives (`Create`/`Set`/`Get`/`Free`
+  for all eleven fields) and the server's nesting limit (a `Ham_Use` pre forward re-running
+  `ExecuteHamB(Ham_Use)`: 8 pre and 8 post calls, then BUSY with one native error, the error xtask
+  expects, and the server's `hooks nested 8 deep` line).
+* Stats round trip (#4), same day and setup, both roots: with upstream's `tsstats.amxx` as the
+  score plugin (it loaded: no "Couldn't load plugin" line), `changelevel` saved a 4-entry
+  `tsstats.dat` (346 bytes) equal, entry for entry and in order, to the rank `get_stats` showed on
+  the next map, ordered by kills - deaths - team kills; `quit` ended the server and saved it again
+  (8 entries: the second map's bots). A restart without bots and with `tsstats_score_e2e.amxx`
+  (deaths - kills) loaded all 8 entries with the same counters and body hits, in the reversed
+  order, so `get_score` ran through `LoadAmxScript`. stop.sh's SIGTERM also saves on Linux
+  (ReHLDS shuts down cleanly), not under Wine.
+* Thrown knife (#5), same day and setup, both roots: `tsx_e2e` freezes the bots
+  (`ts_bot_stop 1`), gives one the combat knife, moves another 96 units in front of it with 1
+  health, aims the thrower at it and throws with `ExecuteHam(Ham_Weapon_SecondaryAttack)` on its
+  `weapon_tsgun`. The knife killed on the first try: `client_damage` and `client_death` named the
+  thrower and `TSW_TKNIFE` (29, "Throwing Knife"), and the thrower's `get_user_wstats` for it
+  showed the kill and the hit (`saveHit` through `projectile_owner`).
+* metamod-p (#1), same day: the whole e2e (21 tsx and 20 hamsandwich checks, the stats round trip)
+  passes with metamod-p v1.21p109 instead of Metamod-R (`MM=metamod-p` amxx-testenv roots), on
+  ReHLDS 3.15 (Linux and Windows under Wine) and on stock HLDS 25th anniversary (Linux build
+  10211 of Oct 8 2024, Windows build 10210 under Wine: the testenv roots with the
+  `~/games/hlds25_*` engine files in place of ReHLDS's). On HLDS 25 the changelevel, `quit` and
+  restart behave as on ReHLDS, and the 4 quota bots play without a human.
+* AMX Mod X 1.9 and 1.8.2 (#2), same day, ReHLDS + Metamod-R, the base packages
+  (`amxmodx-1.9.0-git5303`, `amxmodx-1.8.2`) in place of 1.10 and the plugins compiled with each
+  package's own `amxxpc` (`AMXX_SCRIPTING`; for 1.8.2 also upstream 1.8.2's `tsstats.sma` through
+  `AMXX_TSSTATS_SMA`, as 1.10's needs `STATSX_*`). 1.9: everything passes on both roots. 1.8.2 on
+  Windows: everything passes. 1.8.2 on Linux: our natives first crashed the server (the core
+  enters natives with `esp` = 8 mod 16 and Rust's i686 Linux code spills SSE registers with
+  `movaps`, #17; the modules now realign on entry, `amxx::stack`), and then the core's own
+  `engclient_cmd` crashed it in the server library the same way (the-specialistsmod-rs#199), so
+  on Linux 1.8.2 `tsx_e2e` skips the checks that switch weapons (`giveweapon_visible`,
+  `setuserammo`, the thrown knife); the rest passes, including the stats round trip. Two 1.8.2
+  limits that stock has too: its includes lack the ItemInfo natives and `RegisterHamPlayer`
+  (`ham_e2e` declares them: this module has them whatever the core), and its fakemeta's
+  `get_kvd`/`set_kvd` take fakemeta's own `KVD_Wrapper`, not the `KeyValueData *` hamsandwich
+  passes to `Ham_Keyvalue` hooks (they read the strings as pointers), so there the Keyvalue
+  checks only count the hook calls. Ham numbers are compatible: 1.8.2's 130 and 1.9's `Ham`
+  enums are prefixes of 1.10's.
 
 ## 8. Ham Sandwich
 
@@ -316,7 +363,7 @@ string until the next one).
 `this` and entity arguments, a null TraceResult refused; `ham_execute` with `run_hooks` 0 or 1;
 pointer arguments written back; Float/Vector results into the next by-reference parameter, Str
 into a buffer and length, others returned. Errors from the server (BUSY: the entity is inside
-one of its own functions) are native errors.
+one of its own functions, or the hooks already nest `ham::MAX_DEPTH` = 8 deep) are native errors.
 
 **ItemInfo**: handles are `ItemInfo *`, as stock. The module accepts only those it created or
 that a call in progress passed, so a bad handle is a native error instead of a crash.
@@ -363,4 +410,5 @@ halved and superceded damage, `Ham_Item_PreFrame` on `weapon_tsgun` (a player ow
 `Ham_TS_GiveSlowMul`'s float in a post hook, and the private-data mirror: `get_pdata_cbase` /
 `_safe` / fakemeta's `get_pdata_ent` of `m_pActiveItem` (the player's `weapon_tsgun`), its
 `m_pPlayer` back, `get_pdata_int` of its `m_iId` (16), a reserve written with `set_pdata_int`
-taken by the game and a written `m_iId` overwritten.
+taken by the game and a written `m_iId` overwritten. It also covers TraceAttack's TraceResult,
+Keyvalue's KeyValueData, the ItemInfo natives and the 8-deep nesting limit (section 7).

@@ -30,11 +30,15 @@ the weapon in hand.
   server with an older API, or the older modules on a newer server, find no table. Without it,
   `IsHamValid` is false and `RegisterHam`/`ExecuteHam` fail as stock does for functions missing
   from its gamedata.
-* AMX Mod X 1.10 or 1.9 (1.8.2 should load: the module only requests functions that exist
-  there).
+* AMX Mod X 1.10 or 1.9. 1.8.2 works on Windows; on Linux its core calls the Rust server
+  library on a misaligned stack, so natives that reach the game library (e.g. `engclient_cmd`)
+  crash the server until the-specialistsmod-rs#199 is fixed (`docs/design.md` §7). 1.8.2's
+  fakemeta can't read `Ham_Keyvalue`'s KeyValueData (stock 1.8.2 has the same limit).
 * Metamod: Metamod-R or metamod-p (interface 5:13). AMX Mod X loads tsx as a metamod plugin
   by itself; don't list it in metamod's `plugins.ini`.
-* A 32-bit server (AMX Mod X is 32-bit only): HLDS/ReHLDS on Linux or Windows.
+* A 32-bit server (AMX Mod X is 32-bit only): HLDS/ReHLDS on Linux or Windows. The end-to-end
+  tests pass on ReHLDS 3.15 with Metamod-R 1.3 or metamod-p 1.21p109, and on HLDS 25th
+  anniversary with metamod-p (`docs/design.md` §7).
 
 ## Installing
 
