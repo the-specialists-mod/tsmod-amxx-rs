@@ -12,7 +12,7 @@
 use super::{api_call, info, user};
 use crate::game::Game;
 use crate::state::with;
-use crate::weapons::{FIRST_CUSTOM, KUNG_FU, MAX_WEAPONS};
+use crate::weapons::{FIRST_CUSTOM, MAX_WEAPONS};
 use amxx::Cell;
 use amxx::native::Args;
 use ts_plugin_api::powerup;
@@ -89,7 +89,7 @@ pub fn is_custom(_g: &dyn Game, a: &mut dyn Args) -> Cell {
 /// has it, else the last `WeaponInfo`.
 fn current_weapon(g: &dyn Game, id: usize) -> (Cell, [Cell; 4]) {
     if let Some(i) = info(g, id) {
-        let w = if i.weapon == 0 { KUNG_FU as Cell } else { i.weapon };
+        let w = with(|s| s.weapons.from_wire(i.weapon)).flatten().map_or(i.weapon, |w| w as Cell);
         return (w, [i.clip, i.ammo, i.fire_mode, i.attachments]);
     }
     with(|s| {
@@ -380,17 +380,20 @@ pub fn register_forward(_g: &dyn Game, _a: &mut dyn Args) -> Cell {
 
 /// `ts_setuserammo(id, weapon, ammo)`, upstream a `tsxaddon.inc` function that wrote TS 2.x's
 /// private data (Avalanche, Twilight Suzuka, Harbu). Port addition as a native, with that
-/// function's visible behaviour: kung fu (36) switches to it and gives 0; other ids outside
-/// 0..35, C4 (29) and the katana (34) give 0; otherwise it switches to the weapon and sets its
-/// reserve, or for the grenade and the knives (24, 25, 35) its clip, through the plugin API.
+/// function's visible behaviour: kung fu (38, or 36 with `tsx_legacy_weaponids`) switches to
+/// it and gives 0; other ids outside 0..37 (0..35 with `tsx_legacy_weaponids`: TS 2.x's
+/// weapons), 29 (C4, or TS 3.0's thrown knife) and the katana (34) give 0; otherwise it switches
+/// to the weapon and sets its reserve, or for the grenade and the knives (24, 25, 35) its clip,
+/// through the plugin API.
 pub fn set_user_ammo(g: &dyn Game, a: &mut dyn Args) -> Cell {
     let Some(id) = super::player(g, a, "Player {} is not valid") else { return 0 };
     let (weapon, ammo) = (a.cell(2), a.cell(3));
-    if weapon == KUNG_FU as Cell {
+    let (kung_fu, legacy) = with(|s| (s.weapons.kung_fu() as Cell, s.weapons.legacy())).unwrap_or_default();
+    if weapon == kung_fu {
         g.client_cmd(id as i32, "weapon_0");
         return 0;
     }
-    if !(0..=35).contains(&weapon) {
+    if !(0..=if legacy { 35 } else { 37 }).contains(&weapon) {
         return 0;
     }
     g.client_cmd(id as i32, &format!("weapon_{weapon}"));

@@ -41,7 +41,8 @@ the weapon in hand.
    [releases](https://github.com/the-specialists-mod/tsmod-amxx-rs/releases) and copy its
    `addons/` directory over your server's `ts/addons/`. That puts the three modules in
    `addons/amxmodx/modules/`, replacing AMX Mod X's own tsx, tsfun and hamsandwich (same file
-   names), and the patched `tsxaddon.inc` in `addons/amxmodx/scripting/include/`.
+   names), and the patched `tsxaddon.inc` and `tsconst.inc` in
+   `addons/amxmodx/scripting/include/`.
 2. Plugins that include `tsx.inc`/`tsfun.inc` load the modules automatically. Otherwise add
    `tsx` and `tsfun` lines to `addons/amxmodx/configs/modules.ini`.
 3. Optional, for the stats plugins (`statsx`, `tsstats`): `addons/amxmodx/data/tsstats.amxx`
@@ -57,13 +58,17 @@ Cvars (as upstream): `tsstats_maxsize` (3500: the rank is cleared at map change 
 this long), `tsstats_reset` (1: clear at the next map change), `tsstats_rank` (0 name, 1 Steam
 ID, 2 IP), `tsstats_rankbots` (1), `tsstats_pause` (1 stops stats). Localinfo `tsstats`
 (`addons/amxmodx/data/tsstats.dat`) and `tsstats_score` (`addons/amxmodx/data/tsstats.amxx`).
+Port addition: `tsx_legacy_weaponids` (0: TS 3.0's weapon ids; 1: upstream's, for plugins that
+hard-code kung fu as 36; see [Weapon ids](#weapon-ids)). Set it in `server.cfg` or `amxx.cfg`;
+tsx reads it at map start and when a player enters the game.
 
 ## Native compatibility
 
 Every native upstream tsx registers (`NBase.cpp`, `NRank.cpp`) is registered with the same name
-and arguments, plus `ts_setuserammo`. tsx.inc, tsfun.inc, tsconst.inc and tsstats.inc are AMX
-Mod X's own (use those shipped with AMX Mod X); only `tsxaddon.inc` needs this repository's
-copy.
+and arguments, plus `ts_setuserammo`. tsx.inc, tsfun.inc and tsstats.inc are AMX Mod X's own
+(use those shipped with AMX Mod X); `tsxaddon.inc` needs this repository's copy, and
+`tsconst.inc` does for TS 3.0's weapon ids (`TSW_CONTENDER`, `TSW_ASKORPIONS`, and kung fu and
+the thrown knife where tsx reports them by default).
 
 * **exact**: same behaviour as upstream.
 * **API**: reads or writes the server through the plugin API. Getters fall back to what the
@@ -73,7 +78,7 @@ copy.
 
 | Native | Status | Notes |
 |---|---|---|
-| `xmod_get_wpnname`, `get_weaponname`, `xmod_get_wpnlogname` | exact | Ids 2 and 17 use TS 3.0's names ("Beretta 92F", "Skorpion"); upstream's table had TS 2.x's ("Unk1", "STEYR-TMP") |
+| `xmod_get_wpnname`, `get_weaponname`, `xmod_get_wpnlogname` | approx. | TS 3.0's weapon ids by default: 36 Contender G2, 37 Akimbo Skorpions, 38 kung fu, 29 thrown knife (upstream: 36 kung fu, 37 thrown knife, with `tsx_legacy_weaponids 1`). Ids 2 and 17 use TS 3.0's names ("Beretta 92F", "Skorpion"); upstream's table had TS 2.x's ("Unk1", "STEYR-TMP") |
 | `xmod_is_melee_wpn`, `xmod_get_maxweapons` (44), `xmod_get_stats_size` (8), `xmod_is_custom_wpn` | exact | |
 | `ts_wpnlogtoname`, `ts_wpnlogtoid` | exact | Also resolve TS 3.0's own log spellings (`contender_g2`, `throwing_katana`, `kung-fu`, ...) |
 | `ts_getuserwpn`, `get_user_weapon` | API | The weapon in hand with its clip, reserve, mode, attachments. Without the API: the last `WeaponInfo` (players) or the player model (bots, which get no `WeaponInfo`) |
@@ -101,10 +106,22 @@ copy.
 
 Forwards `client_damage(attacker, victim, damage, wpnindex, hitplace, TA)` and
 `client_death(killer, victim, wpnindex, hitplace, TK)` work as upstream, from the game's
-`TSHealth` message and the victim's `dmg_inflictor`/`dmg_take`. Weapon ids are upstream's: kung
-fu is 36 and a thrown knife 37. TS 3.0's own weapons 36 (Contender G2) and 37 (Akimbo
-Skorpions) share those ids, as they did with upstream tsx on TS 3.0. The real plugins treat 36
-as kung fu.
+`TSHealth` message and the victim's `dmg_inflictor`/`dmg_take`.
+
+### Weapon ids
+
+Upstream tsx numbers weapons as TS 2.x did, with kung fu (which `WeaponInfo` sends as 0) as 36
+and a thrown knife as 37 (`tsconst.inc`'s `TSW_KUNG_FU`, `TSW_TKNIFE`). TS 3.0 added the
+Contender G2 as 36 and the Akimbo Skorpions as 37, so on TS 3.0 upstream reports them as kung
+fu and thrown knife. By default this tsx reports **TS 3.0's ids**: 1-37 as TS 3.0 sends them,
+kung fu as **38** and a thrown knife as **29** (the two ids below the custom slots TS 3.0 never
+uses: upstream's unused "breakable" and TS 2.x's C4). `TSMAX_WEAPONS` stays 44 and the custom
+weapons stay 39-43, so plugins' `[TSMAX_WEAPONS]` arrays fit; `tsstats.dat` keeps no
+per-weapon data and is unaffected. Plugins that use `TSW_KUNG_FU`/`TSW_TKNIFE` or 36/37:
+recompile against [`include/tsconst.inc`](include/tsconst.inc), or set
+`tsx_legacy_weaponids 1` for upstream's numbering (the Contender and Akimbo Skorpions then read
+as kung fu and thrown knife again). The weapon ids every other native takes and returns
+(`get_user_wstats`, `ts_getuserwpn`, `ts_setuserammo`, ...) follow the same numbering.
 
 ### Ham Sandwich
 
@@ -129,8 +146,9 @@ The server's own entities run what TS ran; functions the port never calls for a 
 
 `tsxaddon.inc` (a third-party include many TS plugins use) defined `ts_setuserammo(id, weapon,
 ammo)` as a function that wrote TS 2.x's private data. tsx now provides it as a native with the
-same visible behaviour: 0 for kung fu (36, after `client_cmd(id, "weapon_0")`), for ids outside
-0-35, C4 (29) and the katana (34); otherwise it runs `client_cmd(id, "weapon_<id>")`, sets the
+same visible behaviour: 0 for kung fu (38, or 36 with `tsx_legacy_weaponids 1`, after
+`client_cmd(id, "weapon_0")`), for ids outside 0-37 (0-35, TS 2.x's weapons, with
+`tsx_legacy_weaponids 1`), 29 (C4, or TS 3.0's thrown knife) and the katana (34); otherwise it runs `client_cmd(id, "weapon_<id>")`, sets the
 weapon's reserve ammo (for the grenade and knives, 24/25/35, its clip) through the plugin API
 and returns 1 (0 if the player doesn't own the weapon, or without the API, logged once).
 

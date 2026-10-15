@@ -13,7 +13,7 @@ use crate::game::{Event, Game};
 use crate::msgs::Messages;
 use crate::player::{self, Player};
 use crate::rank::RankSystem;
-use crate::weapons::{KUNG_FU, MAX_WEAPONS, Weapons};
+use crate::weapons::{LEGACY_CVAR, Weapons};
 use std::cell::RefCell;
 
 /// Everything the module keeps.
@@ -111,6 +111,26 @@ impl State {
         for p in self.players.iter_mut().skip(1) {
             p.init();
         }
+        self.sync_weapon_ids(g);
+    }
+
+    /// Port addition: follows `tsx_legacy_weaponids` (see [`crate::weapons`]). Read when a map
+    /// starts and when a player enters the game, so a value from `server.cfg` or `amxx.cfg`
+    /// (executed after `ServerActivate`) holds from the first player on. A player holding kung
+    /// fu keeps holding it under its new id; recorded stats stay under the ids they were made with.
+    pub fn sync_weapon_ids(&mut self, g: &dyn Game) {
+        let legacy = g.cvar(LEGACY_CVAR) as i32 != 0;
+        if legacy == self.weapons.legacy() {
+            return;
+        }
+        let old = self.weapons.kung_fu();
+        self.weapons.set_legacy(legacy);
+        let new = self.weapons.kung_fu();
+        for p in &mut self.players {
+            if p.current == old {
+                p.current = new;
+            }
+        }
     }
 
     /// `ClientConnect_Post`.
@@ -123,6 +143,7 @@ impl State {
     /// `CPlayer::PutInServer` (`ClientPutInServer_Post`, and for bots `ClientUserInfoChanged`).
     pub fn put_in_server(&mut self, g: &dyn Game, ent: i32) {
         let Some(i) = slot(self, ent) else { return };
+        self.sync_weapon_ids(g);
         let p = &mut self.players[i];
         p.restart_stats(true);
         p.ingame = true;
@@ -191,18 +212,17 @@ impl State {
         let Some(i) = slot(self, ent) else { return };
         self.players[i].checkstate = false;
         if let Some(api) = g.api() {
-            if let Ok(info) = api.player_info(ent) {
+            if let Ok(info) = api.player_info(ent)
+                && let Some(w) = self.weapons.from_wire(info.weapon)
+            {
                 let p = &mut self.players[i];
-                let w = if info.weapon == 0 { KUNG_FU } else { info.weapon as usize };
-                if w < MAX_WEAPONS {
-                    p.current = w;
-                    let pw = &mut p.weapons[w];
-                    (pw.clip, pw.ammo, pw.mode, pw.attach) = (info.clip, info.ammo, info.fire_mode, info.attachments);
-                }
+                p.current = w;
+                let pw = &mut p.weapons[w];
+                (pw.clip, pw.ammo, pw.mode, pw.attach) = (info.clip, info.ammo, info.fire_mode, info.attachments);
             }
         } else if g.is_fake_client(ent)
             && g.is_alive(ent)
-            && let Some(w) = crate::weapons::id_from_p_model(&g.weapon_model(ent))
+            && let Some(w) = self.weapons.id_from_p_model(&g.weapon_model(ent))
         {
             // Port addition: bots get no `WeaponInfo`; their model shows what they hold.
             self.players[i].current = w;
@@ -310,7 +330,7 @@ impl State {
                 };
                 let o = owner.filter(|&o| o > 0 && !g.is_free(o)).and_then(|o| slot(self, o))?;
                 attacker = Some(o);
-                weapon = crate::weapons::THROWING_KNIFE;
+                weapon = self.weapons.thrown_knife();
                 aim = self.players[o].aiming;
                 if !ignore_bots(self, g, o, Some(victim)) {
                     player::save_hit(&mut self.players, o, victim, weapon, damage, aim as usize);
@@ -382,7 +402,7 @@ impl State {
                 if sliding {
                     kill_flags |= player::KF_SLIDINGKILL;
                 } else {
-                    weapon = KUNG_FU;
+                    weapon = self.weapons.kung_fu();
                 }
                 a.last_frag += real - a.frags;
                 a.frags = real;

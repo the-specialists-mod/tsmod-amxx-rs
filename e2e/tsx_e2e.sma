@@ -78,7 +78,11 @@ public t_static()
 	xmod_get_wpnname(13, name, charsmax(name));
 	xmod_get_wpnlogname(13, log, charsmax(log));
 	check("wpnname", equal(name, "AK47") && equal(log, "ak47"), name);
-	check("wpnlogtoid", ts_wpnlogtoid("desert_eagle") == 12 && ts_wpnlogtoid("kung_fu") == 36);
+	// TS 3.0's weapon ids (tsx_legacy_weaponids 0, the repo's tsconst.inc).
+	check("wpnlogtoid", ts_wpnlogtoid("desert_eagle") == 12 && ts_wpnlogtoid("kung_fu") == TSW_KUNG_FU
+		&& TSW_KUNG_FU == 38 && ts_wpnlogtoid("contender_g2") == TSW_CONTENDER && ts_wpnlogtoid("throwing_knife") == TSW_TKNIFE);
+	xmod_get_wpnname(TSW_ASKORPIONS, name, charsmax(name));
+	check("wpnname_ts30", equal(name, "Akimbo Skorpions") && xmod_is_melee_wpn(TSW_KUNG_FU) == 1 && xmod_is_melee_wpn(TSW_CONTENDER) == 0, name);
 	ts_wpnlogtoname("m4a1", name, charsmax(name));
 	check("wpnlogtoname", equal(name, "M4A1"), name);
 	check("maxweapons", xmod_get_maxweapons() == 44 && xmod_get_stats_size() == 8);
