@@ -380,8 +380,9 @@ stock's plain native would have followed it). Port changes: the access is bounde
 size from the server (`private_size`), past it a native error where stock read or wrote past the
 object, and `set_pdata_cbase` refuses bytes 8..16, the server's link to the entity (a native
 error). The server takes no pointer writes back (its mirror rewrites them). Without the API: -1
-and a no-op, with one log line. fakemeta's `get_pdata_int` / `set_pdata_int` / `get_pdata_ent`
-are stock's and work on the same mirror (writes to the reserves and clips go back into the
+and a no-op, with one log line. fakemeta's `get_pdata_int` / `set_pdata_int`
+are stock's and work on the same mirror (its `get_pdata_ent` reads an `edict_t*`, which no mirrored
+member is: -2 on `m_pActiveItem`, as on stock HLDS) (writes to the reserves and clips go back into the
 game).
 
 **Version 4's hooks** need nothing new in the dispatcher: the server reports the gun's
