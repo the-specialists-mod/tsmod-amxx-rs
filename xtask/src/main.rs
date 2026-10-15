@@ -238,6 +238,8 @@ fn compile_plugin(scripting: &Path, name: &str, out: &Path) -> Result<(), String
         root().join(format!("e2e/{name}.sma"))
     };
     std::fs::create_dir_all(out.parent().unwrap()).map_err(|e| e.to_string())?;
+    // AMX Mod X 1.8.2's amxxpc exits 0 after errors: only a fresh output file means success.
+    let _ = std::fs::remove_file(out);
     let mut c = Command::new(scripting.join("amxxpc"));
     // The repo's include/ first: its tsxaddon.inc declares the ts_setuserammo native and its
     // tsconst.inc has TS 3.0's weapon ids.

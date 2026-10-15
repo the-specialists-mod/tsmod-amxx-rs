@@ -12,6 +12,42 @@
 #include <fakemeta>
 #include <hamsandwich>
 
+// AMX Mod X 1.8.2's includes (compiled with its own amxxpc for the #2 runs) predate the ItemInfo
+// natives, RegisterHamPlayer and the Sven Co-op functions. This module has the natives whatever
+// the core, so declare them as 1.10's hamsandwich.inc does.
+#if AMXX_VERSION_NUM < 183
+enum HamItemInfo
+{
+	Ham_ItemInfo_iSlot,
+	Ham_ItemInfo_iPosition,
+	Ham_ItemInfo_pszAmmo1,
+	Ham_ItemInfo_iMaxAmmo1,
+	Ham_ItemInfo_pszAmmo2,
+	Ham_ItemInfo_iMaxAmmo2,
+	Ham_ItemInfo_pszName,
+	Ham_ItemInfo_iMaxClip,
+	Ham_ItemInfo_iId,
+	Ham_ItemInfo_iFlags,
+	Ham_ItemInfo_iWeight
+};
+native GetHamItemInfo(iteminfo_handle, HamItemInfo:type, any:...);
+native SetHamItemInfo(iteminfo_handle, HamItemInfo:type, any:...);
+native CreateHamItemInfo();
+native FreeHamItemInfo(itemInfo_handle);
+stock HamHook:RegisterHamPlayer(Ham:function, const Callback[], Post = 0)
+{
+	return RegisterHam(function, "player", Callback, Post);
+}
+#define E2E_HAM_SC_ISPHYSX Ham:319
+// 1.8.2's get_kvd/set_kvd take fakemeta's own KVD_Wrapper (fm_tr2.cpp), not the KeyValueData *
+// hamsandwich passes (1.8.2's stock module too): they would read the strings as pointers, so the
+// Keyvalue checks only count the hook calls there.
+#define E2E_KVD_READABLE 0
+#else
+#define E2E_HAM_SC_ISPHYSX Ham_SC_IsPhysX
+#define E2E_KVD_READABLE 1
+#endif
+
 new const LOG[] = "ham_e2e.log";
 
 new g_pass, g_fail;
@@ -139,8 +175,8 @@ public t_valid()
 {
 	new d[96];
 	formatex(d, charsmax(d), "TakeDamage=%d Killed=%d CS_RoundRespawn=%d SC_IsPhysX=%d",
-		IsHamValid(Ham_TakeDamage), IsHamValid(Ham_Killed), IsHamValid(Ham_CS_RoundRespawn), IsHamValid(Ham_SC_IsPhysX));
-	check("ishamvalid", IsHamValid(Ham_TakeDamage) && IsHamValid(Ham_Killed) && !IsHamValid(Ham_CS_RoundRespawn) && !IsHamValid(Ham_SC_IsPhysX), d);
+		IsHamValid(Ham_TakeDamage), IsHamValid(Ham_Killed), IsHamValid(Ham_CS_RoundRespawn), IsHamValid(E2E_HAM_SC_ISPHYSX));
+	check("ishamvalid", IsHamValid(Ham_TakeDamage) && IsHamValid(Ham_Killed) && !IsHamValid(Ham_CS_RoundRespawn) && !IsHamValid(E2E_HAM_SC_ISPHYSX), d);
 	// An unsupported function fails "like stock": HamFilter gets HAM_FUNC_NOT_CONFIGURED (2).
 	new HamHook:h = RegisterHam(Ham_CS_RoundRespawn, "player", "fw_spawn_post");
 	formatex(d, charsmax(d), "handle=%d filter_err=%d", _:h, g_filter_err);
@@ -274,6 +310,7 @@ public fw_kv_pre(ent, kvd)
 {
 	if (ent != g_kv_ent) return HAM_IGNORED;
 	g_kv_pre++;
+#if E2E_KVD_READABLE
 	get_kvd(kvd, KV_ClassName, g_kv_class, charsmax(g_kv_class));
 	get_kvd(kvd, KV_KeyName, g_kv_key, charsmax(g_kv_key));
 	get_kvd(kvd, KV_Value, g_kv_value, charsmax(g_kv_value));
@@ -282,6 +319,7 @@ public fw_kv_pre(ent, kvd)
 		set_kvd(kvd, KV_fHandled, 1);
 		return HAM_SUPERCEDE;
 	}
+#endif
 	return HAM_IGNORED;
 }
 
@@ -289,7 +327,9 @@ public fw_kv_post(ent, kvd)
 {
 	if (ent != g_kv_ent) return HAM_IGNORED;
 	g_kv_post++;
+#if E2E_KVD_READABLE
 	g_kv_handled = get_kvd(kvd, KV_fHandled);
+#endif
 	return HAM_IGNORED;
 }
 
@@ -300,8 +340,13 @@ kv_case(const name[], const key[], const value[], handled)
 	g_kv_class[0] = g_kv_key[0] = g_kv_value[0] = 0;
 	DispatchKeyValue(g_kv_ent, key, value);
 	formatex(d, charsmax(d), "pre=%d post=%d class=%s key=%s value=%s fHandled=%d", g_kv_pre, g_kv_post, g_kv_class, g_kv_key, g_kv_value, g_kv_handled);
+#if E2E_KVD_READABLE
 	check(name, g_kv_pre == 1 && g_kv_post == 1 && equal(g_kv_class, "trigger_relay") && equal(g_kv_key, key) && equal(g_kv_value, value)
 		&& g_kv_handled == handled, d);
+#else
+	#pragma unused handled
+	check(name, g_kv_pre == 1 && g_kv_post == 1, d);
+#endif
 }
 
 public t_keyvalue()

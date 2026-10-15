@@ -118,7 +118,13 @@ change, compare `nm -D --defined-only` / `objdump -p`.
 - **TS 3.0 never sends `ClipInfo`**, upstream's shot source; shots come from fire events.
 - **Bot AI switches weapons by itself**: the e2e weapon check re-issues `weapon_13` and looks
   again.
-- **amxxpc** needs its own directory on `LD_LIBRARY_PATH`. `state` is a Pawn keyword.
+- **amxxpc** needs its own directory on `LD_LIBRARY_PATH`. `state` is a Pawn keyword. 1.8.2's
+  amxxpc exits 0 after compile errors (xtask deletes the output first), and its `.amxx` is the
+  only kind 1.8.2 loads; `AMXX_VERSION_NUM` is 182 / 190 / 1100.
+- **Entry from AMX Mod X runs on a realigned stack** (`amxx::stack::aligned`, in `natives!`'s
+  dispatch and the `AMXX_*` exports): 1.8.2's Linux core calls in with `esp` = 8 mod 16 and Rust's
+  i686 Linux code faults on its SSE spills (#17). `-C llvm-args=-stackrealign` does nothing in
+  rustc. A new kind of entry point from the core needs the same.
 - **How a server stops decides whether `tsstats.dat` is saved**: `changelevel` and `quit` run
   `ServerDeactivate` (on both roots); `stop.sh`'s SIGTERM does on Linux (ReHLDS shuts down) but
   not under Wine. xtask installs no rank file, so "Could not load stats file" on the match's start

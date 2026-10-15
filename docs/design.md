@@ -221,6 +221,22 @@ Differences:
   10211 of Oct 8 2024, Windows build 10210 under Wine: the testenv roots with the
   `~/games/hlds25_*` engine files in place of ReHLDS's). On HLDS 25 the changelevel, `quit` and
   restart behave as on ReHLDS, and the 4 quota bots play without a human.
+* AMX Mod X 1.9 and 1.8.2 (#2), same day, ReHLDS + Metamod-R, the base packages
+  (`amxmodx-1.9.0-git5303`, `amxmodx-1.8.2`) in place of 1.10 and the plugins compiled with each
+  package's own `amxxpc` (`AMXX_SCRIPTING`; for 1.8.2 also upstream 1.8.2's `tsstats.sma` through
+  `AMXX_TSSTATS_SMA`, as 1.10's needs `STATSX_*`). 1.9: everything passes on both roots. 1.8.2 on
+  Windows: everything passes. 1.8.2 on Linux: our natives first crashed the server (the core
+  enters natives with `esp` = 8 mod 16 and Rust's i686 Linux code spills SSE registers with
+  `movaps`, #17; the modules now realign on entry, `amxx::stack`), and then the core's own
+  `engclient_cmd` crashed it in the server library the same way (the-specialistsmod-rs#199), so
+  on Linux 1.8.2 `tsx_e2e` skips the checks that switch weapons (`giveweapon_visible`,
+  `setuserammo`, the thrown knife); the rest passes, including the stats round trip. Two 1.8.2
+  limits that stock has too: its includes lack the ItemInfo natives and `RegisterHamPlayer`
+  (`ham_e2e` declares them: this module has them whatever the core), and its fakemeta's
+  `get_kvd`/`set_kvd` take fakemeta's own `KVD_Wrapper`, not the `KeyValueData *` hamsandwich
+  passes to `Ham_Keyvalue` hooks (they read the strings as pointers), so there the Keyvalue
+  checks only count the hook calls. Ham numbers are compatible: 1.8.2's 130 and 1.9's `Ham`
+  enums are prefixes of 1.10's.
 
 ## 8. Ham Sandwich
 

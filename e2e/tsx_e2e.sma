@@ -24,6 +24,10 @@ new g_last_killer;
 new bool:g_api;
 new g_give_id;
 new g_set_id;
+// AMX Mod X 1.8.2's Linux core calls the game library on a stack the Rust server can't take
+// (esp = 8 mod 16, then the server's SSE spills fault): its engclient_cmd crashes the server, so
+// the checks that switch weapons are skipped there (tsmod-amxx-rs#2, the-specialistsmod-rs#199).
+new bool:g_no_engclient;
 // The thrown knife (#5).
 new g_kn_thrower, g_kn_victim, g_kn_damage, g_kn_death, g_kn_tries;
 
@@ -42,6 +46,7 @@ public plugin_init()
 {
 	register_plugin("tsx_e2e", "1.0", "tsmod-amxx-rs");
 	log_to_file(LOG, "start: maxplayers=%d", get_maxplayers());
+	g_no_engclient = AMXX_VERSION_NUM < 183 && is_linux_server();
 	// xtask's stats round trip: `tsx_e2e_dump <tag>` over rcon, or localinfo tsx_e2e_dump set
 	// before a changelevel (the rank right after ServerDeactivate saved it).
 	register_srvcmd("tsx_e2e_dump", "cmd_dump");
@@ -128,7 +133,7 @@ first_alive()
 
 public t_knife()
 {
-	if (g_kn_death) return;
+	if (g_kn_death || g_no_engclient) return;
 	if (++g_kn_tries > 6) return;
 	set_cvar_num("ts_bot_stop", 1);
 	g_kn_thrower = 0; g_kn_victim = 0;
@@ -200,6 +205,7 @@ public t_knife_done()
 
 public t_knife_check()
 {
+	if (g_no_engclient) { skip("thrown_knife", "AMX Mod X 1.8.2 on Linux: engclient_cmd would crash the Rust server"); return; }
 	set_cvar_num("ts_bot_stop", 0);
 	new d[160], stats[8], body[8], name[32];
 	xmod_get_wpnname(TSW_TKNIFE, name, charsmax(name));
@@ -295,6 +301,11 @@ public t_give()
 	if (!g_give_id) { check("giveweapon", 0, "no living player"); return; }
 	new ok = ts_giveweapon(g_give_id, 13, 60, 0);
 	check("giveweapon_returns", ok == 1);
+	if (g_no_engclient) {
+		skip("giveweapon_visible", "AMX Mod X 1.8.2 on Linux: engclient_cmd would crash the Rust server");
+		g_give_id = 0;
+		return;
+	}
 	engclient_cmd(g_give_id, "weapon_13");
 }
 
@@ -302,6 +313,7 @@ public t_give()
 public t_give_check()
 {
 	static tries;
+	if (g_no_engclient) return;
 	new id = g_give_id;
 	if (!id || !is_user_alive(id)) { skip("giveweapon_visible", "player died"); return; }
 	new clip, ammo, mode, extra, model[64], d[128];
