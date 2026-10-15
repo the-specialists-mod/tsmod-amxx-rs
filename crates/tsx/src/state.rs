@@ -13,6 +13,7 @@ use crate::game::{Event, Game};
 use crate::msgs::Messages;
 use crate::player::{self, Player};
 use crate::rank::RankSystem;
+use crate::scoring::{self, Blow, Stunt};
 use crate::weapons::{LEGACY_CVAR, Weapons};
 use std::cell::RefCell;
 
@@ -78,6 +79,19 @@ pub fn slot(s: &State, ent: i32) -> Option<usize> {
     (i >= 1 && i < s.players.len()).then_some(i)
 }
 
+/// What the victim's `dmg_inflictor` was.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Inflictor {
+    /// The attacking player itself.
+    Player,
+    /// A `grenade` (its owner the attacker).
+    Grenade,
+    /// A thrown `knife`.
+    Knife,
+    /// Anything else: self-damage.
+    Other,
+}
+
 /// Damage the `TSHealth` handler found, between the `client_damage` forward and the death
 /// bookkeeping.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,6 +102,7 @@ pub struct Hit {
     pub weapon: usize,
     pub aim: i32,
     pub ta: i32,
+    pub by: Inflictor,
 }
 
 impl Hit {
@@ -301,9 +316,11 @@ impl State {
         g.clear_dmg_take(vent);
         let mut attacker = None;
         let (mut weapon, mut aim) = (0usize, 0);
+        let mut by = Inflictor::Other;
         if g.is_client(enemy) {
             let a = slot(self, enemy)?;
             attacker = Some(a);
+            by = Inflictor::Player;
             weapon = self.players[a].current;
             aim = self.players[a].aiming;
             if !ignore_bots(self, g, a, Some(victim)) {
@@ -314,6 +331,7 @@ impl State {
             if class.starts_with('g') {
                 if let Some(o) = g.owner(enemy).filter(|&o| g.is_client(o)).and_then(|o| slot(self, o)) {
                     attacker = Some(o);
+                    by = Inflictor::Grenade;
                     weapon = crate::weapons::GRENADE;
                     if o != victim && !ignore_bots(self, g, o, Some(victim)) {
                         player::save_hit(&mut self.players, o, victim, weapon, damage, 0);
@@ -330,6 +348,7 @@ impl State {
                 };
                 let o = owner.filter(|&o| o > 0 && !g.is_free(o)).and_then(|o| slot(self, o))?;
                 attacker = Some(o);
+                by = Inflictor::Knife;
                 weapon = self.weapons.thrown_knife();
                 aim = self.players[o].aiming;
                 if !ignore_bots(self, g, o, Some(victim)) {
@@ -344,68 +363,83 @@ impl State {
         if self.weapons.melee(weapon) && !ignore_bots(self, g, attacker, None) {
             self.players[attacker].save_shot(weapon);
         }
-        Some(Hit { attacker, victim, damage, weapon, aim, ta })
+        Some(Hit { attacker, victim, damage, weapon, aim, ta, by })
     }
 
     /// The death half of `Client_TSHealth_End`, after `client_damage` ran: kill flags, frag
     /// bookkeeping and the kill stats, and the `client_death` event if the victim died.
+    ///
+    /// Port change: the flags and the frag prediction follow TS 3.0's scoring
+    /// ([`crate::scoring`]) instead of upstream's TS 2.x model, and the weapon of a kill by the
+    /// killer's own hand comes from TS's `DeathMsg` (sent just before this `TSHealth`,
+    /// [`player::DeathNotice`]): "Kung Fu" or "world" is kung fu, a named weapon that weapon.
+    /// Upstream relabelled every kill whose frags it mispredicted as kung fu; tsx does so only
+    /// without a `DeathMsg`, and only when a close-combat kung-fu frag explains the frags exactly.
     pub fn after_damage(&mut self, g: &dyn Game, hit: Hit) -> Option<Event> {
-        let Hit { mut attacker, victim, mut weapon, aim, ta, .. } = hit;
+        let Hit { mut attacker, victim, mut weapon, aim, ta, by, .. } = hit;
         if g.is_alive(victim as i32) {
             return None;
         }
+        let notice = self.players[victim].death_notice.take().filter(|n| n.killer == attacker as i32);
         // No frag for the attacker (e.g. a grenade's owner killed themselves): self kill.
         if g.frags(attacker as i32) - self.players[attacker].frags == 0 {
             attacker = victim;
         }
         let mut kill_flags = 0;
-        if ta == 0 && attacker != victim {
-            let sflags = g.iuser4(attacker as i32);
-            let (mut stunt, mut sliding) = (0, false);
-            if weapon != crate::weapons::GRENADE {
-                if matches!(sflags, 20 | 1028 | 2052) {
-                    stunt = 1;
-                } else if sflags == 36 {
-                    sliding = true;
-                }
-            }
+        if attacker != victim {
             let now = g.time();
-            let bonus = self.weapons.bonus(weapon);
-            let victim_spec = self.players[victim].is_specialist;
-            let a = &mut self.players[attacker];
-            let double = now - a.last_kill < 1.0;
-            if stunt != 0 {
-                kill_flags |= player::KF_STUNTKILL;
-            }
-            a.last_kill = now;
-            a.killing_spree += 1;
-            if a.killing_spree == 10 {
-                a.is_specialist = true;
-            }
-            a.last_frag = bonus + 2 * stunt;
-            if double {
-                a.last_frag *= 2;
-                kill_flags |= player::KF_DOUBLEKILL;
-            }
-            if a.is_specialist {
-                a.last_frag *= 2;
-                kill_flags |= player::KF_ISSPEC;
-            }
-            if victim_spec {
-                a.last_frag += 5;
-                kill_flags |= player::KF_KILLEDSPEC;
-            }
-            a.frags += a.last_frag;
+            let victim_spree = self.players[victim].killing_spree;
             let real = g.frags(attacker as i32);
-            if a.frags != real {
-                // The game scored differently: a sliding kill, or kung fu with a gun in hand.
-                if sliding {
-                    kill_flags |= player::KF_SLIDINGKILL;
-                } else {
-                    weapon = self.weapons.kung_fu();
+            let kung_fu = self.weapons.kung_fu();
+            let a = &mut self.players[attacker];
+            let gained = real - a.frags;
+            // Also after a team kill, which upstream left out of sync, so that the next kill
+            // looked like no frag at all (a self kill).
+            a.frags = real;
+            // TS 3.0 counts every kill of another player in the spree, team kills too.
+            a.killing_spree += 1;
+            a.is_specialist = a.killing_spree > scoring::SPECIALIST_SPREE;
+            if ta == 0 {
+                let named = notice.as_ref().filter(|_| by == Inflictor::Player).map(|n| n.weapon.as_str());
+                let blow = match by {
+                    Inflictor::Player => Blow::own(named, weapon == kung_fu),
+                    Inflictor::Knife => Blow::ThrownKnife,
+                    Inflictor::Grenade | Inflictor::Other => Blow::Other,
+                };
+                let ent = attacker as i32;
+                let (points, stunt) = scoring::points_for_frag(blow, Stunt::of(g.iuser4(ent), g.velocity(ent), g.friction(ent)));
+                let double = now - a.last_kill < scoring::DOUBLE_KILL_SECS;
+                let spree = a.killing_spree;
+                let predict = |points| scoring::player_killed_points(points, double, victim_spree, spree);
+                if let Some(name) = named {
+                    weapon = self.death_msg_weapon(name).unwrap_or(weapon);
+                } else if by == Inflictor::Player && !blow.kung_fu() && predict(points) != gained {
+                    // No `DeathMsg`: a kick with a gun in hand (`glast_closecombat`) if that is
+                    // what the frags show.
+                    let (kick, _) = scoring::points_for_frag(Blow::Own { kung_fu: true, close_combat: true }, stunt);
+                    if predict(kick) == gained {
+                        weapon = kung_fu;
+                    }
                 }
-                a.last_frag += real - a.frags;
-                a.frags = real;
+                let a = &mut self.players[attacker];
+                for (on, flag) in [
+                    (stunt.diving, player::KF_STUNTKILL),
+                    (stunt.sliding, player::KF_SLIDINGKILL),
+                    (double, player::KF_DOUBLEKILL),
+                    (a.is_specialist, player::KF_ISSPEC),
+                    (victim_spree > scoring::SPECIALIST_SPREE, player::KF_KILLEDSPEC),
+                ] {
+                    if on {
+                        kill_flags |= flag;
+                    }
+                }
+                // Only a kill worth points restarts the double-kill clock, and a double kill
+                // stops it (`PlayerKilled` stores 0).
+                if points > 0 {
+                    a.last_kill = if double { 0.0 } else { now };
+                }
+                // `pev->frags` is the truth (upstream corrected its prediction to it too).
+                a.last_frag = gained;
             }
         }
         self.players[attacker].kill_flags = kill_flags;
@@ -413,5 +447,15 @@ impl State {
             player::save_kill(&mut self.players, attacker, victim, weapon, (aim == 1) as i32, ta);
         }
         Some(Event::Death { killer: attacker as i32, victim: victim as i32, weapon: weapon as i32, aim, tk: ta })
+    }
+
+    /// The tsx id of a `DeathMsg` weapon (TS's `get_weapon_info` name, `<name> Stock` for a
+    /// pistol-whip): kung fu for "Kung Fu" and "world", else the weapon of that log name.
+    fn death_msg_weapon(&self, name: &str) -> Option<usize> {
+        if name == "Kung Fu" || name == "world" {
+            return Some(self.weapons.kung_fu());
+        }
+        let name = name.strip_suffix(" Stock").unwrap_or(name);
+        self.weapons.by_logname(&name.to_ascii_lowercase().replace(' ', "_"))
     }
 }

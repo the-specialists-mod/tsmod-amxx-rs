@@ -287,6 +287,10 @@ impl Edict {
         dmg_take / set_dmg_take: f32 = dmg_take);
     field!(/// `pev->origin`.
         origin / set_origin_field: [f32; 3] = origin);
+    field!(/// `pev->velocity`.
+        velocity: [f32; 3] = velocity);
+    field!(/// `pev->friction`.
+        friction: f32 = friction);
     field!(/// `pev->classname`.
         classname_id: goldsrc_sys::string_t = classname);
     field!(/// `pev->netname`.

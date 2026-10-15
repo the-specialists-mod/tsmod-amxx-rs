@@ -18,6 +18,9 @@ pub struct Ent {
     pub alive: bool,
     pub frags: i32,
     pub iuser4: i32,
+    pub velocity: [f32; 3],
+    /// `pev->friction`; [`FakeGame::player`] sets 1.
+    pub friction: f32,
     pub team: i32,
     pub inflictor: Option<i32>,
     pub dmg_take: f32,
@@ -104,9 +107,10 @@ impl FakeGame {
 
     /// Adds a living player `i` named `p<i>`.
     pub fn player(&self, i: i32) {
-        self.ents
-            .borrow_mut()
-            .insert(i, Ent { client: true, alive: true, class: "player".into(), name: format!("p{i}"), ..Default::default() });
+        self.ents.borrow_mut().insert(
+            i,
+            Ent { client: true, alive: true, class: "player".into(), name: format!("p{i}"), friction: 1.0, ..Default::default() },
+        );
     }
 
     pub fn edit(&self, i: i32, f: impl FnOnce(&mut Ent)) {
@@ -142,6 +146,12 @@ impl Game for FakeGame {
     }
     fn iuser4(&self, e: i32) -> i32 {
         self.get(e, |x| x.iuser4)
+    }
+    fn velocity(&self, e: i32) -> [f32; 3] {
+        self.get(e, |x| x.velocity)
+    }
+    fn friction(&self, e: i32) -> f32 {
+        self.get(e, |x| x.friction)
     }
     fn team(&self, e: i32) -> i32 {
         self.get(e, |x| x.team)
@@ -250,8 +260,8 @@ impl shared::protocol::hud_wire::Wire for Feed<'_> {
     fn coord(&mut self, v: f32) {
         self.s.message_float(v);
     }
-    fn string(&mut self, _s: &[u8]) {
-        self.s.message_string();
+    fn string(&mut self, s: &[u8]) {
+        self.s.message_string(&String::from_utf8_lossy(s));
     }
 }
 
@@ -265,7 +275,7 @@ impl shared::protocol::weapons::MsgSink for Feed<'_> {
     fn short(&mut self, v: i32) {
         self.s.message_int(v);
     }
-    fn string(&mut self, _s: &core::ffi::CStr) {
-        self.s.message_string();
+    fn string(&mut self, s: &core::ffi::CStr) {
+        self.s.message_string(&s.to_string_lossy());
     }
 }

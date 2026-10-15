@@ -2,7 +2,7 @@
 // (`weaponData`), Copyright (C) The AMX Mod X Development Team, Copyright (C) 2004 Lukasz
 // Wlasinski.
 
-//! The weapon table: names, log names, melee flags and frag bonuses by tsx weapon id.
+//! The weapon table: names, log names and melee flags by tsx weapon id.
 //!
 //! Two numberings, chosen by the cvar `tsx_legacy_weaponids` (port addition):
 //!
@@ -47,66 +47,64 @@ pub struct Weapon {
     pub melee: bool,
     pub name: String,
     pub logname: String,
-    /// Frags tsx expects for a kill (`lastFrag` before the multipliers).
-    pub bonus: i32,
     /// A slot `custom_weapon_add` filled.
     pub custom: bool,
 }
 
-/// A `weaponData` row: melee, name, log name, frag bonus.
-type Entry = (bool, &'static str, &'static str, i32);
+/// A `weaponData` row: melee, name, log name. Upstream's fourth column, TS 2.x's frag bonus, is
+/// gone: TS 3.0's frags don't follow the weapon table (`crate::scoring`).
+type Entry = (bool, &'static str, &'static str);
 
 /// `weaponData` (Utils.cpp), ids 0 to 38, with the TS 3.0 names for ids 2 and 17: upstream's
 /// numbering. [`TS30`] overrides it for TS 3.0's.
 const TABLE: [Entry; FIRST_CUSTOM] = [
-    (true, "Kung Fu", "kung_fu", 3), // id 0, as WeaponInfo and DeathMsg have it
-    (false, "Glock-18", "glock-18", 1),
-    (false, "Beretta 92F", "beretta_92f", 1), // upstream: "Unk1" (TS 2.x had nothing here)
-    (false, "Mini-Uzi", "mini-uzi", 1),
-    (false, "BENELLI-M3", "benelli_m3", 1),
-    (false, "M4A1", "m4a1", 1),
-    (false, "MP5SD", "mp5sd", 1),
-    (false, "MP5K", "mp5k", 1),
-    (false, "Akimbo Berettas", "akimbo_berettas", 1),
-    (false, "SOCOM-MK23", "socom-mk23", 1),
-    (false, "Akimbo MK23", "akimbo_mk23", 1),
-    (false, "USAS-12", "usas-12", 1),
-    (false, "Desert Eagle", "desert_eagle", 1),
-    (false, "AK47", "ak47", 1),
-    (false, "Five-seveN", "five-seven", 1),
-    (false, "STEYR-AUG", "steyr-aug", 1),
-    (false, "Akimbo Mini-Uzi", "akimbo_mini-uzi", 1),
-    (false, "Skorpion", "skorpion", 1), // upstream: "STEYR-TMP" (TS 2.x)
-    (false, "Barrett M82A1", "barrett_m82a1", 1),
-    (false, "MP7-PDW", "mp7-pdw", 1),
-    (false, "SPAS-12", "spas-12", 1),
-    (false, "Golden Colts", "golden_colts", 1),
-    (false, "Glock-20C", "glock-20c", 1),
-    (false, "UMP", "ump", 1),
-    (false, "M61 Grenade", "m61_grenade", 1),
-    (true, "Combat Knife", "combat_knife", 1),
-    (false, "MOSSBERG 500", "mossberg_500", 1),
-    (false, "M16A4", "m16a4", 1),
-    (false, "Ruger-MK1", "ruger-mk1", 1),
-    (false, "C4", "c4", 0), // no TS 3.0 weapon has id 29
-    (false, "Akimbo Five-seveN", "akimbo_five-seven", 1),
-    (false, "Raging Bull", "raging_bull", 1),
-    (false, "M60E3", "m60e3", 1),
-    (false, "Sawed-off", "sawed-off", 1),
-    (true, "Katana", "katana", 2),
-    (true, "Seal Knife", "seal_knife", 1),
-    (true, "Kung Fu", "kung_fu", 3),               // 36, also TS 3.0's Contender G2
-    (true, "Throwing Knife", "throwing_knife", 2), // 37, also TS 3.0's Akimbo Skorpions
-    (false, "breakable", "breakable", 1),
+    (true, "Kung Fu", "kung_fu"), // id 0, as WeaponInfo and DeathMsg have it
+    (false, "Glock-18", "glock-18"),
+    (false, "Beretta 92F", "beretta_92f"), // upstream: "Unk1" (TS 2.x had nothing here)
+    (false, "Mini-Uzi", "mini-uzi"),
+    (false, "BENELLI-M3", "benelli_m3"),
+    (false, "M4A1", "m4a1"),
+    (false, "MP5SD", "mp5sd"),
+    (false, "MP5K", "mp5k"),
+    (false, "Akimbo Berettas", "akimbo_berettas"),
+    (false, "SOCOM-MK23", "socom-mk23"),
+    (false, "Akimbo MK23", "akimbo_mk23"),
+    (false, "USAS-12", "usas-12"),
+    (false, "Desert Eagle", "desert_eagle"),
+    (false, "AK47", "ak47"),
+    (false, "Five-seveN", "five-seven"),
+    (false, "STEYR-AUG", "steyr-aug"),
+    (false, "Akimbo Mini-Uzi", "akimbo_mini-uzi"),
+    (false, "Skorpion", "skorpion"), // upstream: "STEYR-TMP" (TS 2.x)
+    (false, "Barrett M82A1", "barrett_m82a1"),
+    (false, "MP7-PDW", "mp7-pdw"),
+    (false, "SPAS-12", "spas-12"),
+    (false, "Golden Colts", "golden_colts"),
+    (false, "Glock-20C", "glock-20c"),
+    (false, "UMP", "ump"),
+    (false, "M61 Grenade", "m61_grenade"),
+    (true, "Combat Knife", "combat_knife"),
+    (false, "MOSSBERG 500", "mossberg_500"),
+    (false, "M16A4", "m16a4"),
+    (false, "Ruger-MK1", "ruger-mk1"),
+    (false, "C4", "c4"), // no TS 3.0 weapon has id 29
+    (false, "Akimbo Five-seveN", "akimbo_five-seven"),
+    (false, "Raging Bull", "raging_bull"),
+    (false, "M60E3", "m60e3"),
+    (false, "Sawed-off", "sawed-off"),
+    (true, "Katana", "katana"),
+    (true, "Seal Knife", "seal_knife"),
+    (true, "Kung Fu", "kung_fu"),               // 36, also TS 3.0's Contender G2
+    (true, "Throwing Knife", "throwing_knife"), // 37, also TS 3.0's Akimbo Skorpions
+    (false, "breakable", "breakable"),
 ];
 
-/// TS 3.0's numbering: the slots that differ from [`TABLE`]. The guns' bonus is TS 3.0's base
-/// frag (`points_for_kill` in the port's `rules/scoring.rs`).
+/// TS 3.0's numbering: the slots that differ from [`TABLE`].
 const TS30: [(usize, Entry); 4] = [
-    (THROWN_KNIFE, (true, "Throwing Knife", "throwing_knife", 2)),
-    (36, (false, "Contender G2", "contender_g2", 1)),
-    (37, (false, "Akimbo Skorpions", "akimbo_skorpions", 1)),
-    (KUNG_FU, (true, "Kung Fu", "kung_fu", 3)),
+    (THROWN_KNIFE, (true, "Throwing Knife", "throwing_knife")),
+    (36, (false, "Contender G2", "contender_g2")),
+    (37, (false, "Akimbo Skorpions", "akimbo_skorpions")),
+    (KUNG_FU, (true, "Kung Fu", "kung_fu")),
 ];
 
 /// Log names TS 3.0 writes that differ from the table's (lower case, spaces as underscores), by
@@ -172,8 +170,8 @@ impl Default for Weapons {
     }
 }
 
-fn weapon(&(melee, name, logname, bonus): &Entry) -> Weapon {
-    Weapon { melee, name: name.into(), logname: logname.into(), bonus, custom: false }
+fn weapon(&(melee, name, logname): &Entry) -> Weapon {
+    Weapon { melee, name: name.into(), logname: logname.into(), custom: false }
 }
 
 impl Weapons {
@@ -243,11 +241,6 @@ impl Weapons {
     /// Melee flag of `id` (false for an invalid id).
     pub fn melee(&self, id: usize) -> bool {
         self.get(id).is_some_and(|w| w.melee)
-    }
-
-    /// Frag bonus of `id`.
-    pub fn bonus(&self, id: usize) -> i32 {
-        self.get(id).map_or(0, |w| w.bonus)
     }
 
     /// `ts_wpnlogtoid`: the first id from 1 on whose log name matches, then TS 3.0's spellings.
@@ -333,15 +326,13 @@ mod tests {
     }
 
     #[test]
-    fn melee_and_bonus() {
+    fn melee() {
         let w = Weapons::default();
         let melee: Vec<usize> = (0..MAX_WEAPONS).filter(|&i| w.melee(i)).collect();
         assert_eq!(melee, [0, 25, 29, 34, 35, 38]);
-        assert_eq!((w.bonus(0), w.bonus(34), w.bonus(29), w.bonus(36), w.bonus(37), w.bonus(38)), (3, 2, 2, 1, 1, 3));
         let l = Weapons::new(true);
         let melee: Vec<usize> = (0..MAX_WEAPONS).filter(|&i| l.melee(i)).collect();
         assert_eq!(melee, [0, 25, 34, 35, 36, 37], "upstream's");
-        assert_eq!((l.bonus(0), l.bonus(34), l.bonus(37), l.bonus(29), l.bonus(13)), (3, 2, 2, 0, 1));
     }
 
     #[test]

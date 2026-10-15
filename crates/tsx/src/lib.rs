@@ -19,6 +19,7 @@ pub mod msgs;
 pub mod natives;
 pub mod player;
 pub mod rank;
+pub mod scoring;
 pub mod state;
 pub mod stats;
 pub mod weapons;

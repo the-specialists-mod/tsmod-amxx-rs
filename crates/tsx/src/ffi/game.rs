@@ -130,6 +130,12 @@ impl Game for RealGame {
     fn iuser4(&self, ent: i32) -> i32 {
         self.ent(ent).iuser4()
     }
+    fn velocity(&self, ent: i32) -> [f32; 3] {
+        self.ent(ent).velocity()
+    }
+    fn friction(&self, ent: i32) -> f32 {
+        self.ent(ent).friction()
+    }
     fn team(&self, ent: i32) -> i32 {
         self.ent(ent).team()
     }

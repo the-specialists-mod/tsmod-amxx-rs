@@ -101,6 +101,7 @@ encoders (`shared` is a dev-dependency).
 | `TSSpace` | byte | free slots |
 | `PwUp` | short bits, byte seconds | permanent kung fu (4) / super jump (256), else the held power-up |
 | `TSPAward` (all) | byte player, byte award | award (port addition, for `ts_get_message` without the API) |
+| `DeathMsg` (all) | byte killer, byte victim, string weapon | the victim's last death notice (port addition, for the kill's weapon) |
 
 The server sends bots none of the per-player weapon messages, so `PlayerPreThink` refreshes the
 weapon in hand from the API, or for bots without it from `pev->weaponmodel`
@@ -110,10 +111,29 @@ weapon in hand from the API, or for bots without it from `pev->weaponmodel`
 (consumed) give the hit. A player inflictor uses their weapon in hand and aim (the hit group
 of their last `TraceLine` that hit a player); a `grenade` entity its owner (weapon 24); a
 `knife` the API's `projectile_owner` (the thrown knife, 29 or with `tsx_legacy_weaponids` 37); anything else counts as self-damage with
-weapon 0. Then `client_damage`, and if the victim is dead: tsx's frag bookkeeping (bonus per
-weapon, x2 double kill within 1 s, x2 as specialist (10-kill spree), +5 for killing one, +2 for
-a stunt kill from `iuser4` 20/1028/2052; when the game's frags differ, a sliding kill (`iuser4`
-36) or kung fu with a gun in hand), the kill stats and `client_death`.
+weapon 0. Then `client_damage`, and if the victim is dead: the kill flags and frag
+bookkeeping, the kill stats and `client_death`.
+
+The death half follows TS 3.0's scoring (`scoring.rs`: `TSGetPointsForFrag` 0x89140 and
+`PlayerKilled` 0x895e4 as the port's `rules/scoring.rs` has them), not upstream's TS 2.x model
+(per-weapon bonus with katana 2 and kung fu 3, +2 for a stunt from `iuser4` 20/1028/2052, x2
+within 1 s, x2 from a 10-kill spree before the +5):
+
+* 1 point; 2 for a kung-fu frag or a thrown knife; a grenade (any other inflictor) 1, no stunt.
+* +1 for a stunt (`iuser4 & 0x10c10` at over 80 u/s, `TSKF_STUNTKILL`) or a slide (`iuser4 &
+  0x20`, `friction < 1`, over 80 u/s, `TSKF_SLIDINGKILL`), but not under `glast_closecombat`.
+* x2 for a double kill (under 2 s since the killer's last scoring kill; a double kill resets
+  that to 0, `TSKF_DOUBLEKILL`), +5 for a victim on a spree over 8 (`TSKF_KILLEDSPEC`), then x2
+  from the killer's 10th consecutive kill. The spree counts every kill of another player, team
+  kills included; 9 or more is a Specialist (`TSKF_ISSPEC`).
+
+The kill's weapon, and so its kung-fu-ness, comes from TS itself: `PlayerKilled` broadcasts
+`DeathMsg` just before `Killed` sends the victim's `TSHealth` 0, so tsx keeps it per victim and
+the death half reads it. For a kill by the killer's own hand, "Kung Fu" (a close-combat hit,
+also with a gun in hand) and "world" (kung fu outside one) are kung fu, and a weapon name is
+that weapon (`<name> Stock`, a pistol-whip, is the gun). The plugin API (version 4) reports
+neither the weapon nor kung fu for a kill. `ts_getuserlastfrag` is the change in `pev->frags`,
+as upstream's corrected value was.
 
 Weapon ids (`weapons.rs`): TS 3.0's by default (wire ids 1-37, kung fu 38, thrown knife 29),
 upstream's with `tsx_legacy_weaponids 1` (kung fu 36, thrown knife 37, shared with the Contender
@@ -176,6 +196,18 @@ Differences:
   base time for it), so tsx runs it for 3 s (`SUPERJUMP_SECS`), `SetupPowerUp`'s base time of
   slow motion, infinite clip and double fire rate with `pwupmult` 1.
 * `custom_weapon_add` stores its log name (upstream ignored the argument).
+* Kills are scored as TS 3.0 scores them (section 4), so `ts_getuserkillflags` reports TS 3.0's
+  double kills (2 s), stunts and slides, and specialists (spree 9). Upstream predicted TS 2.x's
+  frags and, when `pev->frags` differed and the kill wasn't a slide, reported the kill as kung fu,
+  which on TS 3.0 turned katana kills, stunt kills with a gun and kills 1-2 s apart into kung fu
+  kills in `client_death` and the weapon stats. tsx takes the weapon from TS's `DeathMsg`; only
+  for a kill without one does it still fall back to kung fu, and only when a close-combat
+  kung-fu frag gives exactly the frags TS gave. The weapon table has no frag bonus column.
+* A team kill resyncs tsx's frag count with `pev->frags` and counts in the killer's spree, as in
+  TS 3.0; upstream left the count one high, so the killer's next kill looked like no frag and
+  was reported as a suicide.
+* Known limit: in The One mode a kill by a player who isn't The One scores 0 and is reported as
+  upstream does, as a self kill, so it doesn't count in that player's tsx spree (TS counts it).
 * `ts_setuserammo` (port addition): `tsxaddon.inc`'s private-data function as a native, through
   the API's `set_weapon_ammo`; the repository ships the patched `include/tsxaddon.inc`. With
   TS 3.0's ids it also takes 36 and 37 (the Contender G2 and Akimbo Skorpions).

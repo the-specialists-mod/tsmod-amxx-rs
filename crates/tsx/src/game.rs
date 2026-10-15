@@ -51,6 +51,10 @@ pub trait Game {
     fn frags(&self, ent: i32) -> i32;
     /// `pev->iuser4` (TS's stunt bits).
     fn iuser4(&self, ent: i32) -> i32;
+    /// `pev->velocity`.
+    fn velocity(&self, ent: i32) -> [f32; 3];
+    /// `pev->friction`.
+    fn friction(&self, ent: i32) -> f32;
     /// `pev->team`.
     fn team(&self, ent: i32) -> i32;
     /// `pev->dmg_inflictor` (`None` for NULL) and `pev->dmg_take`.

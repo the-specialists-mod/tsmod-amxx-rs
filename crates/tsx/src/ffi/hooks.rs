@@ -172,8 +172,12 @@ extern "C" fn write_float_post(v: f32) {
     meta::ignored();
 }
 
-extern "C" fn write_string_post(_s: *const c_char) {
-    with(|s| s.message_string());
+extern "C" fn write_string_post(v: *const c_char) {
+    with(|s| {
+        // Only copied for a message tsx reads: `WRITE_STRING` runs for every message.
+        let v = if s.reading_message() { text(v) } else { String::new() };
+        s.message_string(&v);
+    });
     meta::ignored();
 }
 

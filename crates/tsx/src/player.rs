@@ -37,6 +37,17 @@ pub struct PlayerWeapon {
 }
 
 /// `CPlayer`.
+/// The `DeathMsg` of a player's death (port addition): who TS says killed them and the weapon
+/// name its `PlayerKilled` gave (`"Kung Fu"` for a close-combat hit, `"world"` for kung fu
+/// outside one). Read by the death half of the victim's `TSHealth` 0, which `Killed` sends
+/// after it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeathNotice {
+    /// The killer's entity index, 0 if it isn't a client.
+    pub killer: i32,
+    pub weapon: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct Player {
     pub index: usize,
@@ -58,9 +69,13 @@ pub struct Player {
     /// The `TSPAward` byte last broadcast for this player (port addition: upstream read it from
     /// `CBasePlayer`); `None` until one was seen.
     pub award: Option<i32>,
+    /// TS 3.0's kill spree (`pl+0x744`): kills by this player since their last death.
     pub killing_spree: i32,
+    /// A spree of 9 or more: TS 3.0's Specialist.
     pub is_specialist: bool,
     pub kill_flags: i32,
+    /// This player's last death's `DeathMsg`, until the death half of `TSHealth` takes it.
+    pub death_notice: Option<DeathNotice>,
     pub last_frag: i32,
     pub last_kill: f32,
     /// tsx's own frag count, compared with `pev->frags` to check its kill bookkeeping.
@@ -98,6 +113,7 @@ impl Player {
             killing_spree: 0,
             is_specialist: false,
             kill_flags: 0,
+            death_notice: None,
             last_frag: 0,
             last_kill: 0.0,
             frags: 0,

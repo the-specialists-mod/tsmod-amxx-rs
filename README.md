@@ -97,7 +97,7 @@ the thrown knife where tsx reports them by default).
 | `ts_setuserammo` | API, port addition | Was a function in `tsxaddon.inc` that wrote TS 2.x's private data; now a tsx native with its behaviour (see below) |
 | `ts_set_bullettrail` | unsupported | TS 3.0 has no per-player bullet trails; returns 0 |
 | `ts_giveweapon`, `ts_createpwup`, `ts_givepwup` | exact | Same entity approach (`ts_groundweapon` / `ts_powerup`, KeyValue, Spawn, Use/Touch). `ts_createpwup`'s origin is optional, as `tsfun.inc` declares one argument |
-| `ts_getuserlastfrag`, `ts_getuserkillflags` | exact | tsx's own frag bookkeeping |
+| `ts_getuserlastfrag`, `ts_getuserkillflags` | approx. | TS 3.0's scoring (2 s double kills, +1 stunts and slides, specialists at a 9-kill spree), not upstream's TS 2.x model; the last frag is the change in `pev->frags` ([design §4](docs/design.md#4-messages)) |
 | `ts_setpddata` | approx. | Stored and unused: the thrown knife's owner comes from the API (or `pev->owner`) |
 | `register_statsfwd` | exact | Returns 1 |
 | `get_user_wstats`, `get_user_wrstats` | approx. | Shots are counted from the fire events (TS 3.0 never sends `ClipInfo`, upstream's source), so these return data |
@@ -106,7 +106,9 @@ the thrown knife where tsx reports them by default).
 
 Forwards `client_damage(attacker, victim, damage, wpnindex, hitplace, TA)` and
 `client_death(killer, victim, wpnindex, hitplace, TK)` work as upstream, from the game's
-`TSHealth` message and the victim's `dmg_inflictor`/`dmg_take`.
+`TSHealth` message and the victim's `dmg_inflictor`/`dmg_take`. The kill's weapon comes from
+TS's `DeathMsg` (kung fu when TS says "Kung Fu" or "world"), where upstream reported every kill
+whose frags differed from its TS 2.x prediction as kung fu.
 
 ### Weapon ids
 

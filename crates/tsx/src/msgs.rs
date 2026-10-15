@@ -23,9 +23,10 @@
 //! | `TSSpace` | byte free slots | slots |
 //! | `PwUp` | short power-up bits, byte seconds | permanent kung fu / super jump, or the held one |
 //! | `TSPAward` | byte player, byte award | award (port addition: upstream read `CBasePlayer`) |
+//! | `DeathMsg` | byte killer, byte victim, string weapon | all, for the kill's weapon (port addition, [`DeathNotice`]) |
 
 use crate::game::Game;
-use crate::player::{ITEM_KUNGFU, ITEM_SUPERJUMP};
+use crate::player::{DeathNotice, ITEM_KUNGFU, ITEM_SUPERJUMP};
 use crate::state::{Hit, State, slot};
 
 /// `TSPWUP_KUNGFU`, `TSPWUP_SJUMP`.
@@ -46,11 +47,12 @@ pub enum Kind {
     TsSpace,
     PwUp,
     TsPAward,
+    DeathMsg,
 }
 
 impl Kind {
     /// Every kind with its registered name.
-    pub const ALL: [(Kind, &'static str); 11] = [
+    pub const ALL: [(Kind, &'static str); 12] = [
         (Kind::ResetHud, "ResetHUD"),
         (Kind::WeaponInfo, "WeaponInfo"),
         (Kind::ClipInfo, "ClipInfo"),
@@ -62,6 +64,7 @@ impl Kind {
         (Kind::TsSpace, "TSSpace"),
         (Kind::PwUp, "PwUp"),
         (Kind::TsPAward, "TSPAward"),
+        (Kind::DeathMsg, "DeathMsg"),
     ];
 
     pub fn from_name(name: &str) -> Option<Kind> {
@@ -75,6 +78,7 @@ pub struct Messages {
     ids: Vec<(i32, Kind)>,
     current: Option<(Kind, Option<usize>)>,
     args: Vec<i32>,
+    strs: Vec<String>,
 }
 
 /// What a finished message asks the caller to do once the state is released.
@@ -109,6 +113,7 @@ impl State {
         let p = player.and_then(|e| slot(self, e));
         self.msgs.current = kind.map(|k| (k, p));
         self.msgs.args.clear();
+        self.msgs.strs.clear();
     }
 
     /// `Write{Byte,Char,Short,Long,Entity}_Post`.
@@ -124,9 +129,17 @@ impl State {
         self.message_int(v.to_bits() as i32);
     }
 
-    /// `WriteString_Post`: none of the messages read carries a string; a placeholder keeps the
-    /// positions of the values after it.
-    pub fn message_string(&mut self) {
+    /// Whether a message tsx reads is being written (so a `WRITE_STRING` is worth copying).
+    pub fn reading_message(&self) -> bool {
+        self.msgs.current.is_some()
+    }
+
+    /// `WriteString_Post`: the string is kept apart (only `DeathMsg` carries one); a placeholder
+    /// keeps the positions of the values after it.
+    pub fn message_string(&mut self, v: &str) {
+        if self.msgs.current.is_some() {
+            self.msgs.strs.push(v.to_owned());
+        }
         self.message_int(0);
     }
 
@@ -134,6 +147,7 @@ impl State {
     pub fn message_end(&mut self, g: &dyn Game) -> Followup {
         let Some((kind, player)) = self.msgs.current.take() else { return Followup::None };
         let a = std::mem::take(&mut self.msgs.args);
+        let mut strs = std::mem::take(&mut self.msgs.strs);
         let arg = |i: usize| a.get(i).copied();
         // Broadcasts carry the player in the payload; the rest need the receiving player.
         match kind {
@@ -150,6 +164,17 @@ impl State {
                     && let Some(i) = slot(self, id)
                 {
                     self.players[i].award = Some(award);
+                }
+                return Followup::None;
+            }
+            Kind::DeathMsg => {
+                // Port addition: `PlayerKilled` sends it before `Killed` sends the victim's
+                // `TSHealth` 0, so the death half of that message finds it.
+                if let (Some(killer), Some(victim)) = (arg(0), arg(1))
+                    && let Some(i) = slot(self, victim)
+                    && !strs.is_empty()
+                {
+                    self.players[i].death_notice = Some(DeathNotice { killer, weapon: strs.swap_remove(0) });
                 }
                 return Followup::None;
             }
@@ -209,7 +234,7 @@ impl State {
                     None => {}
                 }
             }
-            Kind::ScoreInfo | Kind::TsPAward => {}
+            Kind::ScoreInfo | Kind::TsPAward | Kind::DeathMsg => {}
         }
         Followup::None
     }
@@ -222,6 +247,8 @@ impl State {
         let p = &mut self.players[i];
         if g.is_alive(ent) {
             p.clear_stats = g.time() + 0.25;
+            // A notice no `TSHealth` took (a death without damage) must not reach a later death.
+            p.death_notice = None;
         } else {
             p.items = 0;
             p.is_specialist = false;
