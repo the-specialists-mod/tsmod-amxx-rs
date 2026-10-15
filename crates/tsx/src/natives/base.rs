@@ -12,7 +12,7 @@
 use super::{api_call, info, user};
 use crate::game::Game;
 use crate::state::with;
-use crate::weapons::{FIRST_CUSTOM, KUNG_FU, MAX_WEAPONS};
+use crate::weapons::{FIRST_CUSTOM, MAX_WEAPONS};
 use amxx::Cell;
 use amxx::native::Args;
 use ts_plugin_api::powerup;
@@ -89,7 +89,7 @@ pub fn is_custom(_g: &dyn Game, a: &mut dyn Args) -> Cell {
 /// has it, else the last `WeaponInfo`.
 fn current_weapon(g: &dyn Game, id: usize) -> (Cell, [Cell; 4]) {
     if let Some(i) = info(g, id) {
-        let w = if i.weapon == 0 { KUNG_FU as Cell } else { i.weapon };
+        let w = with(|s| s.weapons.from_wire(i.weapon)).flatten().map_or(i.weapon, |w| w as Cell);
         return (w, [i.clip, i.ammo, i.fire_mode, i.attachments]);
     }
     with(|s| {
@@ -229,11 +229,40 @@ pub fn is_running_powerup(g: &dyn Game, a: &mut dyn Args) -> Cell {
     info(g, id).map_or(0, |i| i.active_powerup)
 }
 
+/// The power-ups that run for a time, lowest bit first: what the API's `run_powerup` takes, one
+/// at a time (TS 3.0 runs one power-up at a time).
+const RUNNABLE: [Cell; 5] = [powerup::SLOWMO, powerup::INFAMMO, powerup::SLOWPAUSE, powerup::DFIRERATE, powerup::SUPERJUMP];
+
+/// Seconds a forced superjump runs. TS 3.0 gives it no running length: a picked-up superjump is
+/// a permanent item (`PlayerAddPowerUp` 0x97bc8 sets `mj`), and `SetupPowerUp` (0x98014) has no
+/// base time for it, so the API needs one. 3 s is `SetupPowerUp`'s base time (with `pwupmult`
+/// 1) of slow motion, infinite clip and double fire rate, the stored timed power-ups.
+pub const SUPERJUMP_SECS: f32 = 3.0;
+
 /// `ts_force_run_powerup(id, PWUP_TYPE)`: runs the power-up for its normal time (0 stops it).
+/// Upstream wrote any value into TS 2.x's running-power-up field; TS 3.0 runs one power-up at a
+/// time, so with several bits set this runs the lowest runnable one and logs once that the
+/// others were dropped. Superjump runs for [`SUPERJUMP_SECS`]. A value without a runnable bit
+/// does nothing and returns 0 (logged once).
 pub fn force_powerup_run(g: &dyn Game, a: &mut dyn Args) -> Cell {
+    const NATIVE: &str = "ts_force_run_powerup";
     let Some(id) = user(g, a) else { return 0 };
     let bits = a.cell(2);
-    api_call(g, "ts_force_run_powerup", |api| api.run_powerup(id as i32, bits, -1.0))
+    if bits == 0 {
+        return api_call(g, NATIVE, |api| api.run_powerup(id as i32, 0, -1.0));
+    }
+    let Some(run) = RUNNABLE.into_iter().find(|&b| bits & b != 0) else {
+        // Nothing TS 3.0 can run (kung fu, grenade, health, armor are instant): the server's
+        // `INVALID`, without asking it.
+        return api_call(g, NATIVE, |_| Err(ts_plugin_api::INVALID));
+    };
+    if run != bits && g.api().is_some() {
+        super::log_once(g, &format!("{NATIVE}:dropped"), || {
+            format!("{NATIVE}: TS 3.0 runs one power-up at a time; ran {run} of {bits} and dropped the other bits (logged once)")
+        });
+    }
+    let secs = if run == powerup::SUPERJUMP { SUPERJUMP_SECS } else { -1.0 };
+    api_call(g, NATIVE, |api| api.run_powerup(id as i32, run, secs))
 }
 
 /// `ts_has_superjump(id)`.
@@ -380,17 +409,20 @@ pub fn register_forward(_g: &dyn Game, _a: &mut dyn Args) -> Cell {
 
 /// `ts_setuserammo(id, weapon, ammo)`, upstream a `tsxaddon.inc` function that wrote TS 2.x's
 /// private data (Avalanche, Twilight Suzuka, Harbu). Port addition as a native, with that
-/// function's visible behaviour: kung fu (36) switches to it and gives 0; other ids outside
-/// 0..35, C4 (29) and the katana (34) give 0; otherwise it switches to the weapon and sets its
-/// reserve, or for the grenade and the knives (24, 25, 35) its clip, through the plugin API.
+/// function's visible behaviour: kung fu (38, or 36 with `tsx_legacy_weaponids`) switches to
+/// it and gives 0; other ids outside 0..37 (0..35 with `tsx_legacy_weaponids`: TS 2.x's
+/// weapons), 29 (C4, or TS 3.0's thrown knife) and the katana (34) give 0; otherwise it switches
+/// to the weapon and sets its reserve, or for the grenade and the knives (24, 25, 35) its clip,
+/// through the plugin API.
 pub fn set_user_ammo(g: &dyn Game, a: &mut dyn Args) -> Cell {
     let Some(id) = super::player(g, a, "Player {} is not valid") else { return 0 };
     let (weapon, ammo) = (a.cell(2), a.cell(3));
-    if weapon == KUNG_FU as Cell {
+    let (kung_fu, legacy) = with(|s| (s.weapons.kung_fu() as Cell, s.weapons.legacy())).unwrap_or_default();
+    if weapon == kung_fu {
         g.client_cmd(id as i32, "weapon_0");
         return 0;
     }
-    if !(0..=35).contains(&weapon) {
+    if !(0..=if legacy { 35 } else { 37 }).contains(&weapon) {
         return 0;
     }
     g.client_cmd(id as i32, &format!("weapon_{weapon}"));

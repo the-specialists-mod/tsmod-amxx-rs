@@ -13,7 +13,7 @@
 //! | Message | Payload | Read |
 //! |---|---|---|
 //! | `ResetHUD` | byte 0 | at the end: spawn or death bookkeeping |
-//! | `WeaponInfo` | byte id, byte clip, short reserve, byte mode, byte attachments | all (id 0 = kung fu = 36) |
+//! | `WeaponInfo` | byte id, byte clip, short reserve, byte mode, byte attachments | all (id 0 = kung fu: 38, or 36 with `tsx_legacy_weaponids`) |
 //! | `ClipInfo` | byte clip | a drop counts a shot (TS 3.0 never sends it) |
 //! | `ScoreInfo` | byte player, short frags, short deaths, short class, short team | player, team |
 //! | `TSHealth` | byte health | at the end: damage and death |
@@ -27,7 +27,6 @@
 use crate::game::Game;
 use crate::player::{ITEM_KUNGFU, ITEM_SUPERJUMP};
 use crate::state::{Hit, State, slot};
-use crate::weapons::{KUNG_FU, MAX_WEAPONS};
 
 /// `TSPWUP_KUNGFU`, `TSPWUP_SJUMP`.
 const PWUP_KUNGFU: i32 = 4;
@@ -161,10 +160,7 @@ impl State {
             Kind::ResetHud => self.reset_hud(g, i),
             Kind::WeaponInfo => {
                 let Some(id) = arg(0) else { return Followup::None };
-                let w = if id == 0 { KUNG_FU } else { id as usize };
-                if w >= MAX_WEAPONS {
-                    return Followup::None;
-                }
+                let Some(w) = self.weapons.from_wire(id) else { return Followup::None };
                 let p = &mut self.players[i];
                 p.current = w;
                 let pw = &mut p.weapons[w];
@@ -196,7 +192,7 @@ impl State {
                 // A weapon lost (thrown, or all of them at death): upstream's "fix for a dropped
                 // weapon" puts the player back on kung fu.
                 if arg(1) == Some(0) {
-                    self.players[i].current = KUNG_FU;
+                    self.players[i].current = self.weapons.kung_fu();
                 }
             }
             Kind::TsCash => self.players[i].money = arg(0).unwrap_or(self.players[i].money),

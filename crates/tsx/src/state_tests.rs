@@ -31,10 +31,34 @@ fn weapon_info_sets_the_weapon_in_hand() {
     assert_eq!(p.current, 13);
     let w = &p.weapons[13];
     assert_eq!((w.clip, w.ammo, w.mode, w.attach), (30, 90, 1, 8));
-    // Kung fu: id 0 on the wire, 36 in tsx.
+    // Kung fu: id 0 on the wire, 38 in tsx; 36 is TS 3.0's Contender G2.
     let kf = WeaponInfo { id: 0, clip: 50, reserve: 0, mode: 0, items: 0 };
     Feed::send(&mut s, &g, Kind::WeaponInfo, Some(1), |f| kf.write(f));
+    assert_eq!(s.players[1].current, 38);
+    let g2 = WeaponInfo { id: 36, clip: 1, reserve: 10, mode: 0, items: 0 };
+    Feed::send(&mut s, &g, Kind::WeaponInfo, Some(1), |f| g2.write(f));
     assert_eq!(s.players[1].current, 36);
+}
+
+#[test]
+fn legacy_weapon_ids_follow_the_cvar() {
+    let (mut s, g) = setup();
+    let kf = WeaponInfo { id: 0, clip: 50, reserve: 0, mode: 0, items: 0 };
+    Feed::send(&mut s, &g, Kind::WeaponInfo, Some(1), |f| kf.write(f));
+    assert_eq!(s.players[1].current, 38);
+    // amxx.cfg runs after ServerActivate: the next player to enter brings the change, and whoever
+    // holds kung fu keeps holding it.
+    g.set_cvar("tsx_legacy_weaponids", 1.0);
+    s.put_in_server(&g, 2);
+    assert!(s.weapons.legacy());
+    assert_eq!(s.players[1].current, 36);
+    assert_eq!(s.weapons.get(36).unwrap().name, "Kung Fu");
+    Feed::send(&mut s, &g, Kind::WeaponInfo, Some(1), |f| WeaponInfo { id: 13, ..kf }.write(f));
+    Feed::send(&mut s, &g, Kind::WeaponInfo, Some(1), |f| kf.write(f));
+    assert_eq!(s.players[1].current, 36);
+    g.set_cvar("tsx_legacy_weaponids", 0.0);
+    s.server_activate(&g);
+    assert!(!s.weapons.legacy());
 }
 
 #[test]
@@ -44,7 +68,7 @@ fn wstatus_of_a_lost_weapon_means_kung_fu() {
     Feed::send(&mut s, &g, Kind::WStatus, Some(2), |f| WStatus { id: 5, owned: 1, clip: 30 }.write(f));
     assert_eq!(s.players[2].current, 13);
     Feed::send(&mut s, &g, Kind::WStatus, Some(2), |f| WStatus { id: 13, owned: 0, clip: 0 }.write(f));
-    assert_eq!(s.players[2].current, 36);
+    assert_eq!(s.players[2].current, 38);
 }
 
 #[test]
@@ -166,8 +190,26 @@ fn unexpected_frags_mean_kung_fu() {
         e.alive = false;
     });
     Feed::send(&mut s, &g, Kind::TsHealth, Some(2), |f| TsHealth { hp: 0 }.write(f));
-    assert_eq!(g.fired.borrow()[1], Event::Death { killer: 1, victim: 2, weapon: 36, aim: 0, tk: 0 });
+    assert_eq!(g.fired.borrow()[1], Event::Death { killer: 1, victim: 2, weapon: 38, aim: 0, tk: 0 });
     assert_eq!((s.players[1].last_frag, s.players[1].frags), (3, 3));
+}
+
+#[test]
+fn legacy_unexpected_frags_mean_kung_fu_36() {
+    let (mut s, g) = setup();
+    g.set_cvar("tsx_legacy_weaponids", 1.0);
+    s.server_activate(&g);
+    s.put_in_server(&g, 1);
+    s.put_in_server(&g, 2);
+    s.players[1].current = 13;
+    g.edit(1, |e| e.frags = 3);
+    g.edit(2, |e| {
+        e.inflictor = Some(1);
+        e.dmg_take = 10.0;
+        e.alive = false;
+    });
+    Feed::send(&mut s, &g, Kind::TsHealth, Some(2), |f| TsHealth { hp: 0 }.write(f));
+    assert_eq!(g.fired.borrow()[1], Event::Death { killer: 1, victim: 2, weapon: 36, aim: 0, tk: 0 });
 }
 
 #[test]
@@ -194,8 +236,8 @@ fn grenades_and_thrown_knives_find_their_thrower() {
         e.dmg_take = 30.0;
     });
     Feed::send(&mut s, &g, Kind::TsHealth, Some(2), |f| TsHealth { hp: 1 }.write(f));
-    assert_eq!(g.fired.borrow()[1], Event::Damage { attacker: 3, victim: 2, damage: 30, weapon: 37, aim: 0, ta: 0 });
-    assert_eq!(s.players[3].weapons[37].stats.shots, 1, "melee hits count as shots");
+    assert_eq!(g.fired.borrow()[1], Event::Damage { attacker: 3, victim: 2, damage: 30, weapon: 29, aim: 0, ta: 0 });
+    assert_eq!(s.players[3].weapons[29].stats.shots, 1, "melee hits count as shots");
 }
 
 #[test]
@@ -212,7 +254,16 @@ fn the_api_names_a_thrown_knifes_owner() {
         e.dmg_take = 30.0;
     });
     Feed::send(&mut s, &g, Kind::TsHealth, Some(2), |f| TsHealth { hp: 1 }.write(f));
-    assert_eq!(g.fired.borrow()[0], Event::Damage { attacker: 1, victim: 2, damage: 30, weapon: 37, aim: 0, ta: 0 });
+    assert_eq!(g.fired.borrow()[0], Event::Damage { attacker: 1, victim: 2, damage: 30, weapon: 29, aim: 0, ta: 0 });
+    // Upstream's numbering: 37.
+    g.set_cvar("tsx_legacy_weaponids", 1.0);
+    s.server_activate(&g);
+    g.edit(2, |e| {
+        e.inflictor = Some(51);
+        e.dmg_take = 30.0;
+    });
+    Feed::send(&mut s, &g, Kind::TsHealth, Some(2), |f| TsHealth { hp: 1 }.write(f));
+    assert_eq!(g.fired.borrow()[1], Event::Damage { attacker: 1, victim: 2, damage: 30, weapon: 37, aim: 0, ta: 0 });
 }
 
 #[test]

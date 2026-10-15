@@ -137,10 +137,13 @@ fn dist(debug_info: bool) -> Result<(), String> {
             }
             eprintln!("  {}", dest.display());
         }
-        // The patched tsxaddon.inc (ts_setuserammo as a native), for recompiling plugins.
+        // The patched includes, for recompiling plugins: tsxaddon.inc (ts_setuserammo as a
+        // native) and tsconst.inc (TS 3.0's weapon ids).
         let inc = root().join("dist").join(t.platform).join("addons/amxmodx/scripting/include");
         std::fs::create_dir_all(&inc).map_err(|e| e.to_string())?;
-        std::fs::copy(root().join("include/tsxaddon.inc"), inc.join("tsxaddon.inc")).map_err(|e| e.to_string())?;
+        for f in ["tsxaddon.inc", "tsconst.inc"] {
+            std::fs::copy(root().join("include").join(f), inc.join(f)).map_err(|e| e.to_string())?;
+        }
     }
     Ok(())
 }
@@ -226,7 +229,8 @@ fn compile_plugin(scripting: &Path, name: &str, out: &Path) -> Result<(), String
     let sma = root().join(format!("e2e/{name}.sma"));
     std::fs::create_dir_all(out.parent().unwrap()).map_err(|e| e.to_string())?;
     let mut c = Command::new(scripting.join("amxxpc"));
-    // The repo's include/ first: its tsxaddon.inc declares the ts_setuserammo native.
+    // The repo's include/ first: its tsxaddon.inc declares the ts_setuserammo native and its
+    // tsconst.inc has TS 3.0's weapon ids.
     c.env("LD_LIBRARY_PATH", scripting)
         .arg(&sma)
         .arg(format!("-i{}", root().join("include").display()))

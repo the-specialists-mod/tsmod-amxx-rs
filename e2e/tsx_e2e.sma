@@ -78,7 +78,11 @@ public t_static()
 	xmod_get_wpnname(13, name, charsmax(name));
 	xmod_get_wpnlogname(13, log, charsmax(log));
 	check("wpnname", equal(name, "AK47") && equal(log, "ak47"), name);
-	check("wpnlogtoid", ts_wpnlogtoid("desert_eagle") == 12 && ts_wpnlogtoid("kung_fu") == 36);
+	// TS 3.0's weapon ids (tsx_legacy_weaponids 0, the repo's tsconst.inc).
+	check("wpnlogtoid", ts_wpnlogtoid("desert_eagle") == 12 && ts_wpnlogtoid("kung_fu") == TSW_KUNG_FU
+		&& TSW_KUNG_FU == 38 && ts_wpnlogtoid("contender_g2") == TSW_CONTENDER && ts_wpnlogtoid("throwing_knife") == TSW_TKNIFE);
+	xmod_get_wpnname(TSW_ASKORPIONS, name, charsmax(name));
+	check("wpnname_ts30", equal(name, "Akimbo Skorpions") && xmod_is_melee_wpn(TSW_KUNG_FU) == 1 && xmod_is_melee_wpn(TSW_CONTENDER) == 0, name);
 	ts_wpnlogtoname("m4a1", name, charsmax(name));
 	check("wpnlogtoname", equal(name, "M4A1"), name);
 	check("maxweapons", xmod_get_maxweapons() == 44 && xmod_get_stats_size() == 8);
@@ -132,8 +136,9 @@ public t_setters_check()
 		id, ts_getusercash(id), ts_getuserslots(id), ts_get_message(id), ts_is_running_powerup(id), until, get_gametime());
 	check("setters_visible", ts_getusercash(id) == 1234 && ts_getuserslots(id) == 50 && ts_get_message(id) == TSMSG_SPECIALIST
 		&& ts_is_running_powerup(id) == TSPWUP_SLOWMO && until > get_gametime(), d);
-	// One power-up bit for its normal length.
-	new f = ts_force_run_powerup(id, TSPWUP_DFIRERATE);
+	// Several bits: tsx runs the lowest runnable one (TS 3.0 runs one at a time) for its normal
+	// length and logs once that superjump was dropped.
+	new f = ts_force_run_powerup(id, TSPWUP_DFIRERATE | TSPWUP_SUPERJUMP);
 	check("force_run_powerup", f == 1, "");
 	set_task(0.3, "t_powerup_check");
 }

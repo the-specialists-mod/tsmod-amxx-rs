@@ -46,7 +46,7 @@ pub struct Player {
     pub team_id: i32,
     /// Hit group of the last player this player's traces hit.
     pub aiming: i32,
-    /// tsx weapon id in hand (kung fu as 36).
+    /// tsx weapon id in hand (kung fu as `Weapons::kung_fu`).
     pub current: usize,
     /// `TSSpace`, `TSCash`, `PwUp` (type and value), as last sent.
     pub space: i32,

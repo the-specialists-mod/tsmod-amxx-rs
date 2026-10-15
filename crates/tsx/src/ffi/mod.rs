@@ -65,6 +65,8 @@ fn meta_attach() {
     e.register_cvar(c"tsstats_rank", c"0", 0);
     e.register_cvar(c"tsstats_rankbots", c"1", 0);
     e.register_cvar(c"tsstats_pause", c"0", 0);
+    // Port addition: upstream's weapon ids (kung fu 36, thrown knife 37) for old plugins.
+    e.register_cvar(c"tsx_legacy_weaponids", c"0", 0);
 }
 
 /// `get_localinfo(name, def)`: the localinfo value, set to `def` first when empty.

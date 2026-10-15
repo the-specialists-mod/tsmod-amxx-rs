@@ -91,7 +91,7 @@ encoders (`shared` is a dev-dependency).
 | Message | Payload | tsx keeps |
 |---|---|---|
 | `ResetHUD` | byte | alive: commit life stats in 0.25 s; dead: reset spree, items, kill flags, resync frags |
-| `WeaponInfo` | byte id, byte clip, short reserve, byte mode, byte attachments | weapon in hand (0 = kung fu = 36) and its ammo |
+| `WeaponInfo` | byte id, byte clip, short reserve, byte mode, byte attachments | weapon in hand (0 = kung fu = 38, or 36 with `tsx_legacy_weaponids`) and its ammo |
 | `ClipInfo` | byte clip | a drop = a shot (TS 3.0 never sends it) |
 | `ScoreInfo` (all) | byte player, short frags, deaths, class, team | team (the port sends team + 1) |
 | `TSHealth` | byte health | damage and death (below) |
@@ -109,11 +109,17 @@ weapon in hand from the API, or for bots without it from `pev->weaponmodel`
 `TSHealth` (upstream `Client_TSHealth_End`): the victim's `dmg_inflictor` and `dmg_take`
 (consumed) give the hit. A player inflictor uses their weapon in hand and aim (the hit group
 of their last `TraceLine` that hit a player); a `grenade` entity its owner (weapon 24); a
-`knife` the API's `projectile_owner` (weapon 37); anything else counts as self-damage with
+`knife` the API's `projectile_owner` (the thrown knife, 29 or with `tsx_legacy_weaponids` 37); anything else counts as self-damage with
 weapon 0. Then `client_damage`, and if the victim is dead: tsx's frag bookkeeping (bonus per
 weapon, x2 double kill within 1 s, x2 as specialist (10-kill spree), +5 for killing one, +2 for
 a stunt kill from `iuser4` 20/1028/2052; when the game's frags differ, a sliding kill (`iuser4`
 36) or kung fu with a gun in hand), the kill stats and `client_death`.
+
+Weapon ids (`weapons.rs`): TS 3.0's by default (wire ids 1-37, kung fu 38, thrown knife 29),
+upstream's with `tsx_legacy_weaponids 1` (kung fu 36, thrown knife 37, shared with the Contender
+G2 and Akimbo Skorpions). `State::sync_weapon_ids` reads the cvar at `ServerActivate` and at
+every `PutInServer`, because `server.cfg` and `amxx.cfg` run after `ServerActivate`; a switch
+rebuilds the TS slots (custom slots stay) and moves a player holding kung fu to its new id.
 
 ## 5. Stats and the rank
 
@@ -150,15 +156,29 @@ Fixes:
 
 Differences:
 
-* Weapon names 2 and 17, log-name aliases, ids 36/37 shared with Contender G2 / Akimbo
-  Skorpions (`weapons.rs`).
+* Weapon ids: TS 3.0's by default, so 36/37 are the Contender G2 / Akimbo Skorpions, kung fu
+  is 38 (upstream 36) and the thrown knife 29 (upstream 37, TS 2.x's C4 there); the cvar
+  `tsx_legacy_weaponids 1` (port addition) restores upstream's. `TSMAX_WEAPONS` (44) and the
+  custom slots (39-43) don't move. The repository ships a patched `include/tsconst.inc`
+  (`TSW_CONTENDER`, `TSW_ASKORPIONS`, the moved `TSW_KUNG_FU`/`TSW_TKNIFE`). TS 3.0's two guns
+  have a frag bonus of 1 (TS 3.0's base frag).
+* Weapon names 2 and 17, log-name aliases (`weapons.rs`).
 * Shots from fire events; bots' weapons from their model without the API.
 * Player state through the API instead of `CBasePlayer` offsets (section 3).
 * `ts_get_message`: no award reads as `TSMSG_NORMAL` (6); `ts_set_message(6)` clears it.
 * `ts_set_bullettrail` does nothing (the server answers UNSUPPORTED).
+* `ts_force_run_powerup`: upstream wrote any value into TS 2.x's running-power-up field; the
+  API's `run_powerup` runs exactly one of slow motion, infinite clip, slow pause, double fire
+  rate and superjump, as TS 3.0 runs one power-up at a time. With several bits set tsx runs the
+  lowest of those and logs once that the others were dropped; a value with none of them returns
+  0 (logged once) without asking the server. Superjump has no running length in TS 3.0 (a
+  picked-up one is a permanent item, `PlayerAddPowerUp` 0x97bc8; `SetupPowerUp` 0x98014 has no
+  base time for it), so tsx runs it for 3 s (`SUPERJUMP_SECS`), `SetupPowerUp`'s base time of
+  slow motion, infinite clip and double fire rate with `pwupmult` 1.
 * `custom_weapon_add` stores its log name (upstream ignored the argument).
 * `ts_setuserammo` (port addition): `tsxaddon.inc`'s private-data function as a native, through
-  the API's `set_weapon_ammo`; the repository ships the patched `include/tsxaddon.inc`.
+  the API's `set_weapon_ammo`; the repository ships the patched `include/tsxaddon.inc`. With
+  TS 3.0's ids it also takes 36 and 37 (the Contender G2 and Akimbo Skorpions).
 
 ## 7. Testing
 

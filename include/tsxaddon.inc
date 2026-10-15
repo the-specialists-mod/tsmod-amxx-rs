@@ -18,10 +18,11 @@
 
  // ts_setuserammo is a tsx native in tsmod-amxx-rs (the Rust TS server's AMX Mod X modules).
  // The old function here wrote TS 2.x's private data, which the Rust server doesn't have; the
- // native keeps its behaviour: 0 for kung fu (36, after switching to it), invalid ids, C4 (29)
- // and the katana (34); otherwise it switches to the weapon and sets its reserve ammo (for the
- // grenade and the knives, 24/25/35, its clip) and returns 1. 0 when the server lacks the plugin
- // API. Recompile plugins against this file to use it.
+ // native keeps its behaviour: 0 for kung fu (38, after switching to it; 36 with
+ // tsx_legacy_weaponids 1), invalid ids (past 37; past 35 with tsx_legacy_weaponids 1), 29 (C4,
+ // or TS 3.0's thrown knife) and the katana (34); otherwise it switches to the weapon and sets
+ // its reserve ammo (for the grenade and the knives, 24/25/35, its clip) and returns 1. 0 when
+ // the server lacks the plugin API. Recompile plugins against this file to use it.
  // Original code: Avalanche ("Avalanches Ammo Code").
 native ts_setuserammo(id, weapon, ammo);
 

@@ -4,7 +4,7 @@
 //! so each has its own module state.
 
 use super::{base, stats};
-use crate::game::{Event, PlayerInfo};
+use crate::game::{Event, Game, PlayerInfo};
 use crate::state::with;
 use crate::testing::FakeGame;
 use amxx::Cell;
@@ -107,7 +107,7 @@ fn getters_prefer_the_api() {
     assert_eq!(base::get_user_message(&g, &mut a), 6, "award 0 reads as TSMSG_NORMAL");
     assert_eq!(base::is_running_powerup(&g, &mut a), 1);
     assert_eq!(f32::from_bits(base::is_in_slowmo(&g, &mut a) as u32), 42.5);
-    assert_eq!(base::ts_get_user_weapon(&g, &mut a), 36, "API weapon 0 is kung fu");
+    assert_eq!(base::ts_get_user_weapon(&g, &mut a), 38, "API weapon 0 is kung fu");
     let v = a.alloc(vec![0]);
     a.params = vec![1, v];
     assert_eq!(base::get_user_pwup(&g, &mut a), 16);
@@ -149,6 +149,39 @@ fn setters_call_the_api() {
         assert!(inv.errors.is_empty(), "upstream raised no error here");
     }
     assert_eq!(*g.logs.borrow(), ["ts_setuserslots: the server rejected a value as out of range (logged once)"]);
+}
+
+#[test]
+fn force_run_powerup_runs_one_bit() {
+    let g = FakeGame::with_api();
+    joined(&g, &[2]);
+    let api = g.api.as_ref().unwrap();
+    let run = |bits: Cell| base::force_powerup_run(&g, &mut FakeArgs::new(&[2, bits]));
+    assert_eq!(run(256), 1, "superjump");
+    assert_eq!(api.calls.borrow().last().unwrap(), "run_powerup 2 256 3", "superjump needs a duration");
+    assert_eq!(run(0), 1);
+    assert_eq!(api.calls.borrow().last().unwrap(), "run_powerup 2 0 -1");
+    assert!(g.logs.borrow().is_empty());
+    // Several bits: the lowest runnable one, logged once.
+    for _ in 0..2 {
+        assert_eq!(run(16 | 8 | 4), 1);
+        assert_eq!(api.calls.borrow().last().unwrap(), "run_powerup 2 8 -1");
+    }
+    assert_eq!(run(256 | 64), 1);
+    assert_eq!(api.calls.borrow().last().unwrap(), "run_powerup 2 256 3");
+    assert_eq!(
+        *g.logs.borrow(),
+        ["ts_force_run_powerup: TS 3.0 runs one power-up at a time; ran 8 of 28 and dropped the other bits (logged once)"]
+    );
+    // No runnable bit: nothing runs.
+    let n = api.calls.borrow().len();
+    assert_eq!((run(4), run(32 | 64 | 128), run(512)), (0, 0, 0));
+    assert_eq!(api.calls.borrow().len(), n, "the server isn't asked");
+    assert_eq!(g.logs.borrow().len(), 2, "one rejection line");
+    let none = FakeGame::new();
+    joined(&none, &[2]);
+    assert_eq!(base::force_powerup_run(&none, &mut FakeArgs::new(&[2, 3])), 0);
+    assert_eq!(none.logs.borrow().len(), 1, "only the no-API line");
 }
 
 #[test]
@@ -262,15 +295,25 @@ fn setuserammo_follows_the_tsxaddon_function() {
     let g = FakeGame::with_api();
     joined(&g, &[1]);
     let run = |w: Cell, n: Cell| base::set_user_ammo(&g, &mut FakeArgs::new(&[1, w, n]));
-    assert_eq!(run(36, 5), 0, "kung fu");
+    assert_eq!(run(38, 5), 0, "kung fu");
     assert_eq!(run(40, 5), 0, "invalid");
     assert_eq!(run(34, 5), 0, "katana");
+    assert_eq!(run(29, 5), 0, "the thrown knife");
     assert_eq!(run(13, 77), 1);
     assert_eq!(run(24, 3), 1);
+    assert_eq!(run(36, 9), 1, "TS 3.0's Contender G2");
+    g.set_cvar("tsx_legacy_weaponids", 1.0);
+    with(|s| s.sync_weapon_ids(&g));
+    assert_eq!(run(36, 5), 0, "kung fu in upstream's numbering");
+    assert_eq!(run(37, 5), 0, "past TS 2.x's weapons");
     let cmds: Vec<String> = g.commands.borrow().iter().map(|(_, c)| c.clone()).collect();
-    assert_eq!(cmds, ["weapon_0", "weapon_34", "weapon_13", "weapon_24"]);
+    assert_eq!(cmds, ["weapon_0", "weapon_34", "weapon_29", "weapon_13", "weapon_24", "weapon_36", "weapon_0"]);
     let calls = g.api.as_ref().unwrap().calls.borrow().clone();
-    assert_eq!(calls, ["set_weapon_ammo 1 13 -1 77", "set_weapon_ammo 1 24 3 -1"], "reserve for guns, clip for grenades and knives");
+    assert_eq!(
+        calls,
+        ["set_weapon_ammo 1 13 -1 77", "set_weapon_ammo 1 24 3 -1", "set_weapon_ammo 1 36 -1 9"],
+        "reserve for guns, clip for grenades and knives"
+    );
     let none = FakeGame::new();
     assert_eq!(base::set_user_ammo(&none, &mut FakeArgs::new(&[1, 13, 5])), 0);
     assert_eq!(none.logs.borrow().len(), 1);
