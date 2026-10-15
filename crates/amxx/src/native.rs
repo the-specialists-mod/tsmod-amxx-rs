@@ -124,7 +124,8 @@ pub unsafe fn dispatch(amx: *mut Amx, params: *const Cell, f: fn(&mut dyn Args) 
         let n = (*params).max(0) as usize / size_of::<Cell>();
         core::slice::from_raw_parts(params.add(1), n)
     };
-    f(&mut AmxArgs { amx, params })
+    // AMX Mod X 1.8.2 calls natives on a stack Rust's i686 Linux code can't use (#17).
+    crate::stack::aligned(|| f(&mut AmxArgs { amx, params }))
 }
 
 /// Builds a `'static` native table (NULL-terminated) from `"name" => function` pairs, where each

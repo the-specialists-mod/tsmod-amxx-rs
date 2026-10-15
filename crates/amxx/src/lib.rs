@@ -14,6 +14,7 @@
 //! * [`native`] / [`natives!`]: native tables and their arguments.
 //! * [`engine`]: engine functions and entity fields.
 //! * [`script`]: the stats modules' score plugin.
+//! * [`stack`]: realigning the stack on entry from AMX Mod X (1.8.2 calls natives misaligned).
 //! * [`dl`]: finding the game library's exports; [`tsapi`]: the Rust TS server's plugin API.
 
 pub mod core;
@@ -24,6 +25,7 @@ pub mod meta;
 pub mod module;
 pub mod native;
 pub mod script;
+pub mod stack;
 pub mod tsapi;
 
 pub use ffi::Cell;
