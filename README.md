@@ -90,7 +90,7 @@ the thrown knife where tsx reports them by default).
 | `ts_set_message` | API, approx. | 1-16 as upstream; `TSMSG_NORMAL` clears the award |
 | `ts_setusercash`, `ts_setuserslots` | API | Returns as upstream (`ts_setusercash` always 0). The server accepts cash 0-30000, slots 0-81 |
 | `ts_set_fakeslowmo`, `ts_set_fakeslowpause` | API | Run slow motion / slow pause for the given time without using a held power-up |
-| `ts_force_run_powerup` | API, approx. | One power-up bit (1, 2, 8, 16, 256) for its normal length; 0 stops it. Upstream wrote any value; the server rejects combinations |
+| `ts_force_run_powerup` | API, approx. | Runs one power-up (1, 2, 8, 16, 256) for its normal length; 0 stops it. Upstream wrote any value; TS 3.0 runs one power-up at a time, so with several bits set tsx runs the lowest of those and logs once that it dropped the rest. Superjump, which TS 3.0 never runs for a time (picked up, it is a permanent item), runs 3 s, the base time of TS 3.0's timed power-ups. A value with none of those bits returns 0 (logged once) |
 | `ts_is_running_powerup` | API | 0 without the API |
 | `ts_is_in_slowmo` | API, approx. | When the player is slowed, the time their power-up ends (a float, as upstream); else 0 |
 | `ts_set_speed`, `ts_set_physics_speed` | API | Speed 0-2 |

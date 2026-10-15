@@ -229,11 +229,40 @@ pub fn is_running_powerup(g: &dyn Game, a: &mut dyn Args) -> Cell {
     info(g, id).map_or(0, |i| i.active_powerup)
 }
 
+/// The power-ups that run for a time, lowest bit first: what the API's `run_powerup` takes, one
+/// at a time (TS 3.0 runs one power-up at a time).
+const RUNNABLE: [Cell; 5] = [powerup::SLOWMO, powerup::INFAMMO, powerup::SLOWPAUSE, powerup::DFIRERATE, powerup::SUPERJUMP];
+
+/// Seconds a forced superjump runs. TS 3.0 gives it no running length: a picked-up superjump is
+/// a permanent item (`PlayerAddPowerUp` 0x97bc8 sets `mj`), and `SetupPowerUp` (0x98014) has no
+/// base time for it, so the API needs one. 3 s is `SetupPowerUp`'s base time (with `pwupmult`
+/// 1) of slow motion, infinite clip and double fire rate, the stored timed power-ups.
+pub const SUPERJUMP_SECS: f32 = 3.0;
+
 /// `ts_force_run_powerup(id, PWUP_TYPE)`: runs the power-up for its normal time (0 stops it).
+/// Upstream wrote any value into TS 2.x's running-power-up field; TS 3.0 runs one power-up at a
+/// time, so with several bits set this runs the lowest runnable one and logs once that the
+/// others were dropped. Superjump runs for [`SUPERJUMP_SECS`]. A value without a runnable bit
+/// does nothing and returns 0 (logged once).
 pub fn force_powerup_run(g: &dyn Game, a: &mut dyn Args) -> Cell {
+    const NATIVE: &str = "ts_force_run_powerup";
     let Some(id) = user(g, a) else { return 0 };
     let bits = a.cell(2);
-    api_call(g, "ts_force_run_powerup", |api| api.run_powerup(id as i32, bits, -1.0))
+    if bits == 0 {
+        return api_call(g, NATIVE, |api| api.run_powerup(id as i32, 0, -1.0));
+    }
+    let Some(run) = RUNNABLE.into_iter().find(|&b| bits & b != 0) else {
+        // Nothing TS 3.0 can run (kung fu, grenade, health, armor are instant): the server's
+        // `INVALID`, without asking it.
+        return api_call(g, NATIVE, |_| Err(ts_plugin_api::INVALID));
+    };
+    if run != bits && g.api().is_some() {
+        super::log_once(g, &format!("{NATIVE}:dropped"), || {
+            format!("{NATIVE}: TS 3.0 runs one power-up at a time; ran {run} of {bits} and dropped the other bits (logged once)")
+        });
+    }
+    let secs = if run == powerup::SUPERJUMP { SUPERJUMP_SECS } else { -1.0 };
+    api_call(g, NATIVE, |api| api.run_powerup(id as i32, run, secs))
 }
 
 /// `ts_has_superjump(id)`.

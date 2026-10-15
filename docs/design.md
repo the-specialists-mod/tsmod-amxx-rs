@@ -167,6 +167,14 @@ Differences:
 * Player state through the API instead of `CBasePlayer` offsets (section 3).
 * `ts_get_message`: no award reads as `TSMSG_NORMAL` (6); `ts_set_message(6)` clears it.
 * `ts_set_bullettrail` does nothing (the server answers UNSUPPORTED).
+* `ts_force_run_powerup`: upstream wrote any value into TS 2.x's running-power-up field; the
+  API's `run_powerup` runs exactly one of slow motion, infinite clip, slow pause, double fire
+  rate and superjump, as TS 3.0 runs one power-up at a time. With several bits set tsx runs the
+  lowest of those and logs once that the others were dropped; a value with none of them returns
+  0 (logged once) without asking the server. Superjump has no running length in TS 3.0 (a
+  picked-up one is a permanent item, `PlayerAddPowerUp` 0x97bc8; `SetupPowerUp` 0x98014 has no
+  base time for it), so tsx runs it for 3 s (`SUPERJUMP_SECS`), `SetupPowerUp`'s base time of
+  slow motion, infinite clip and double fire rate with `pwupmult` 1.
 * `custom_weapon_add` stores its log name (upstream ignored the argument).
 * `ts_setuserammo` (port addition): `tsxaddon.inc`'s private-data function as a native, through
   the API's `set_weapon_ammo`; the repository ships the patched `include/tsxaddon.inc`. With

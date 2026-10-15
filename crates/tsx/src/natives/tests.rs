@@ -152,6 +152,39 @@ fn setters_call_the_api() {
 }
 
 #[test]
+fn force_run_powerup_runs_one_bit() {
+    let g = FakeGame::with_api();
+    joined(&g, &[2]);
+    let api = g.api.as_ref().unwrap();
+    let run = |bits: Cell| base::force_powerup_run(&g, &mut FakeArgs::new(&[2, bits]));
+    assert_eq!(run(256), 1, "superjump");
+    assert_eq!(api.calls.borrow().last().unwrap(), "run_powerup 2 256 3", "superjump needs a duration");
+    assert_eq!(run(0), 1);
+    assert_eq!(api.calls.borrow().last().unwrap(), "run_powerup 2 0 -1");
+    assert!(g.logs.borrow().is_empty());
+    // Several bits: the lowest runnable one, logged once.
+    for _ in 0..2 {
+        assert_eq!(run(16 | 8 | 4), 1);
+        assert_eq!(api.calls.borrow().last().unwrap(), "run_powerup 2 8 -1");
+    }
+    assert_eq!(run(256 | 64), 1);
+    assert_eq!(api.calls.borrow().last().unwrap(), "run_powerup 2 256 3");
+    assert_eq!(
+        *g.logs.borrow(),
+        ["ts_force_run_powerup: TS 3.0 runs one power-up at a time; ran 8 of 28 and dropped the other bits (logged once)"]
+    );
+    // No runnable bit: nothing runs.
+    let n = api.calls.borrow().len();
+    assert_eq!((run(4), run(32 | 64 | 128), run(512)), (0, 0, 0));
+    assert_eq!(api.calls.borrow().len(), n, "the server isn't asked");
+    assert_eq!(g.logs.borrow().len(), 2, "one rejection line");
+    let none = FakeGame::new();
+    joined(&none, &[2]);
+    assert_eq!(base::force_powerup_run(&none, &mut FakeArgs::new(&[2, 3])), 0);
+    assert_eq!(none.logs.borrow().len(), 1, "only the no-API line");
+}
+
+#[test]
 fn setters_without_the_api_fail_softly_and_log_once() {
     let g = FakeGame::new();
     joined(&g, &[1]);
