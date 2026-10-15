@@ -2,12 +2,14 @@
 // GPL-3.0-or-later with the AMX Mod X exceptions.
 //
 // Hooks Ham_Spawn, Ham_TakeDamage (pre and post), Ham_Killed, Ham_Touch on players and
-// Ham_Think on an entity, then checks the effects through game state (health), and writes
+// Ham_Think on an entity, then checks the effects through game state (health); reads and writes
+// the server's private-data mirror (plugin API v5) with get/set_pdata_cbase and fakemeta; writes
 // "CHECK <name> PASS|FAIL|SKIP <detail>" lines and "DONE ..." to addons/amxmodx/logs/ham_e2e.log.
 #include <amxmodx>
 #include <fun>
 #include <engine>
 #include <hamsandwich>
+#include <fakemeta>
 
 new const LOG[] = "ham_e2e.log";
 
@@ -21,6 +23,15 @@ new g_think_ent;
 // Plugin API v4 (the-specialistsmod-rs#99): the gun's functions on weapon_tsgun and the queries.
 new g_preframes, g_preframe_bad, g_slowmul;
 new Float:g_slowmul_ret = -1.0;
+// Plugin API v5 (tsmod-amxx-rs#10): the private-data mirror, TS 3.0's offsets (mp.dll's ints;
+// the gun's members are 4 ints further on Linux, the player's 5).
+const m_pActiveItem = 639;
+const TSGUN_m_pPlayer = 28;
+const TSGUN_m_iId = 30;
+const TSGUN_reserve = 49; // + ammo type
+const TSGUN_LINUX = 4;
+const PROBE_AMMO = 13; // the Contender's: bots rarely carry it, so nothing else changes it meanwhile
+new g_pd_player, g_pd_gun;
 
 check(const name[], ok, const detail[] = "")
 {
@@ -63,6 +74,7 @@ public plugin_init()
 	set_task(15.0, "t_valid");
 	set_task(20.0, "t_damage");
 	set_task(22.0, "t_think_setup");
+	set_task(30.0, "t_pdata");
 	set_task(50.0, "t_events");
 	set_task(51.0, "t_finish");
 }
@@ -201,6 +213,48 @@ public t_events()
 	log_to_file(LOG, "v4: %s", d);
 	check("item_preframe", g_preframes > 0 && g_preframe_bad == 0, d);
 	check("giveslowmul_float", g_slowmul > 0 && g_slowmul_ret >= 0.01 && g_slowmul_ret <= 2.0, d);
+}
+
+// The mirror: a living player's m_pActiveItem points to its weapon_tsgun, whose m_pPlayer points back and
+// whose m_iId is 16; pev sits where TS's gamedata says (fakemeta's get_pdata_ent). A plugin's
+// write of a reserve is taken back by the game, a write of m_iId is overwritten.
+public t_pdata()
+{
+	new d[192], alive;
+	for (new i = 1; i <= get_maxplayers(); i++) {
+		if (!is_user_alive(i)) continue;
+		alive++;
+		new active = get_pdata_cbase(i, m_pActiveItem);
+		if (active > 0) { g_pd_player = i; g_pd_gun = active; break; }
+	}
+	if (!alive) { skip("pdata", "no living player"); return; }
+	if (!g_pd_gun) { check("pdata_cbase", 0, "m_pActiveItem is NULL for every living player"); return; }
+	new id = g_pd_player, gun = g_pd_gun, class[32];
+	entity_get_string(gun, EV_SZ_classname, class, charsmax(class));
+	new owner = get_pdata_cbase(gun, TSGUN_m_pPlayer, TSGUN_LINUX);
+	new safe = get_pdata_cbase_safe(id, m_pActiveItem);
+	new ent = get_pdata_ent(id, m_pActiveItem * 4, 20);
+	new iid = get_pdata_int(gun, TSGUN_m_iId, TSGUN_LINUX);
+	formatex(d, charsmax(d), "id=%d m_pActiveItem=%d (%s, owner %d) safe=%d get_pdata_ent=%d m_pPlayer=%d m_iId=%d", id, gun, class,
+		entity_get_edict(gun, EV_ENT_owner), safe, ent, owner, iid);
+	log_to_file(LOG, "pdata: %s", d);
+	check("pdata_cbase", equal(class, "weapon_tsgun") && entity_get_edict(gun, EV_ENT_owner) == id && safe == gun && owner == id, d);
+	check("pdata_ent_pev", ent == gun, d);
+	check("pdata_int_mirror", iid == 16, d);
+	// Writes: the reserve comes back from the game, m_iId is the game's again.
+	set_pdata_int(gun, TSGUN_reserve + PROBE_AMMO, 123, TSGUN_LINUX);
+	set_pdata_int(gun, TSGUN_m_iId, 99, TSGUN_LINUX);
+	set_task(0.3, "t_pdata_check");
+}
+
+public t_pdata_check()
+{
+	new gun = g_pd_gun, d[96];
+	if (!is_valid_ent(gun)) { skip("pdata_write", "the gun is gone"); return; }
+	new reserve = get_pdata_int(gun, TSGUN_reserve + PROBE_AMMO, TSGUN_LINUX), iid = get_pdata_int(gun, TSGUN_m_iId, TSGUN_LINUX);
+	formatex(d, charsmax(d), "reserve[%d]=%d m_iId=%d", PROBE_AMMO, reserve, iid);
+	check("pdata_write_taken", reserve == 123, d);
+	check("pdata_write_overwritten", iid == 16, d);
 }
 
 public t_finish()

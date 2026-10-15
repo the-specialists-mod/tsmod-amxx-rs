@@ -18,15 +18,15 @@ the weapon in hand.
 |---|---|---|---|
 | TSX | `tsx`, class `xstats` | `tsx_amxx_i386.so` / `tsx_amxx.dll` | All the TS natives, the stats natives, `client_damage` / `client_death`, tsfun.inc's `client_stunt` / `client_powerup` / `Melee_Attack`, the rank. A metamod plugin too. |
 | TSFun Wrapper | `tsfun` | `tsfun_amxx_i386.so` / `tsfun_amxx.dll` | Empty, as upstream: lets plugins with `#include <tsfun>` (`#pragma reqlib tsfun`) load. |
-| Ham Sandwich | `hamsandwich` | `hamsandwich_amxx_i386.so` / `hamsandwich_amxx.dll` | `RegisterHam`, `ExecuteHam` and the rest, over the server's entity hooks (plugin API version 5, including the gun's `Item_*` / `Weapon_*` functions on `weapon_tsgun`). Replaces AMX Mod X's file of the same name. A metamod plugin too. |
+| Ham Sandwich | `hamsandwich` | `hamsandwich_amxx_i386.so` / `hamsandwich_amxx.dll` | `RegisterHam`, `ExecuteHam` and the rest, over the server's entity hooks (plugin API version 5, including the gun's `Item_*` / `Weapon_*` functions on `weapon_tsgun`), and `get_pdata_cbase` over the server's private-data mirror. Replaces AMX Mod X's file of the same name. A metamod plugin too. |
 
 ## Requirements
 
 * The Rust TS server ([the-specialistsmod-rs](https://github.com/the-specialists-mod/the-specialistsmod-rs))
   on Linux or Windows, with the plugin API (`main` from `f585a02` on; releases after v0.2.0).
   Older builds work too, but the natives that change players do nothing (see below).
-  Both modules need version 5 of the API (`TSRS_PluginApi005`: kill reports and the tsfun
-  forwards, tsmod-amxx-rs#8, #15, the-specialistsmod-rs#197); a
+  Both modules need version 5 of the API (`TSRS_PluginApi005`: kill reports, the tsfun
+  forwards and the private-data mirror, tsmod-amxx-rs#8, #10, #15, the-specialistsmod-rs#197); a
   server with an older API, or the older modules on a newer server, find no table. Without it,
   `IsHamValid` is false and `RegisterHam`/`ExecuteHam` fail as stock does for functions missing
   from its gamedata.
@@ -151,7 +151,7 @@ has (`IsHamValid`) and for which classes.
 | `GetHamReturnStatus`, `GetHamReturn*`, `GetOrigHamReturn*`, `SetHamReturn*`, `SetHamParam*` | exact | Parameter 1 is `this`. Pre forwards see earlier forwards' changes; the highest result skips the function at `HAM_SUPERCEDE`; post forwards run even then; the last forward's result decides whether the return value is the plugin's (`HAM_OVERRIDE` or more) or the function's, as stock. `SetHamParamEntity` keeps the index later forwards see, `SetHamParamEntity2` updates it |
 | `SetHamParamTraceResult`, `SetHamParamItemInfo` | exact | TraceResults are handles fakemeta's `get_tr2`/`set_tr2` take |
 | `CreateHamItemInfo`, `FreeHamItemInfo`, `GetHamItemInfo`, `SetHamItemInfo` | approx. | An unknown handle is a native error (stock dereferences any value) |
-| `get_pdata_cbase`, `get_pdata_cbase_safe`, `set_pdata_cbase` | approx. | Entity and offset checks as stock; TS's C++ offsets don't exist on the Rust server, so reads give -1 (null) and writes do nothing (logged once) |
+| `get_pdata_cbase`, `get_pdata_cbase_safe`, `set_pdata_cbase` | approx. | Entity and offset checks as stock. The Rust server mirrors the TS members plugins read at TS's offsets (`m_pActiveItem` at 639, +5 on Linux, is the player's `weapon_tsgun`; its `m_pPlayer` at 28, +4 on Linux); reads and writes are bounded by the block (a native error past it, and for writes to the server's link at bytes 8..16); a pointer to no entity is -1 (`_safe`: -2). Without the API: -1 and no write, logged once |
 
 The server's own entities run what TS ran; functions the port never calls for a class (say,
 `Ham_Think` on players) never fire, as with a vtable entry the game never calls.
@@ -168,12 +168,23 @@ and returns 1 (0 if the player doesn't own the weapon, or without the API, logge
 
 To use it, **recompile the plugin against [`include/tsxaddon.inc`](include/tsxaddon.inc)** from
 this repository (the original minus that function, plus the native's declaration). Plugins
-already compiled with the old include keep their own copy of the function, which on the Rust
-server reads and writes zeroed private data and does nothing.
+already compiled with the old include keep their own copy of the function, which writes the
+`weapon_tsgun` at `mp.dll`'s offsets: on a Windows server the reserve (int 49 + ammo type) and
+clip (`m_iClip`, int 41) it writes go into the game through the server's private-data mirror
+(below); on Linux its default shift of 5 ints lands one int past TS's (`CTSGun` is shifted by 4),
+as it did on TS's own Linux server.
 
-Not fixable in a module: other plugin code that reads or writes private data itself (fakemeta
-`get_pdata_*`/`set_pdata_*` with TS offsets) gets zeros on the Rust server. Hooks through
-hamsandwich work (above).
+### Private data (fakemeta, `get_pdata_cbase`)
+
+The Rust server's entities aren't C++ objects, but since plugin API version 5 the server writes
+the TS 3.0 members plugins read into their private data at TS's offsets, for its platform, and
+takes some writes back (the port's `docs/implementation/plugin-api.md` §4.1): `pev`; a player's
+`m_pActiveItem` (its `weapon_tsgun`); the `weapon_tsgun`'s `m_pPlayer`, `m_iId` (16), `m_iClip`
+(written: the gun in hand's clip), current weapon id, reserve ammo per ammo type (written: taken
+into the game) and the 38 weapon records' owned / ammo type / fire mode, clip (written: taken) and
+attachments. So stock fakemeta's `get_pdata_int`/`set_pdata_int`/`get_pdata_ent` and this
+hamsandwich's `get_pdata_cbase` read them (values up to a frame old; a write takes effect within a
+frame). Other offsets read zeros (or what a plugin wrote) and their writes do nothing.
 
 ## Building
 

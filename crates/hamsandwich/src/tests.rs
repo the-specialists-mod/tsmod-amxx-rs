@@ -4,7 +4,7 @@
 //! and pdata, against [`FakeHost`]. Each test runs on its own thread, with its own state.
 
 use crate::hooks::{FwdArg, Val, error, result::*};
-use crate::host::HamApi;
+use crate::host::{HamApi, Host};
 use crate::natives as n;
 use crate::testing::*;
 use amxx::Cell;
@@ -305,9 +305,10 @@ fn item_infos() {
     assert_eq!(call(&h, n::free_ham_item_info, &[ii]), 0);
 }
 
+/// Without the server's private-data size (no plugin API version 5) the natives read nothing.
 #[test]
-fn pdata_natives_read_nothing() {
-    let h = FakeHost::new();
+fn pdata_natives_without_the_server_read_nothing() {
+    let h = FakeHost { has_api: false, ..FakeHost::new() };
     assert_eq!(call(&h, n::get_pdata_cbase, &[1, 100, 5, 5]), -1);
     assert_eq!(call(&h, n::get_pdata_cbase_safe, &[1, 100, 5, 5]), -1);
     assert_eq!(call(&h, n::set_pdata_cbase, &[1, 100, 2, 5, 5]), 1);
@@ -318,6 +319,42 @@ fn pdata_natives_read_nothing() {
     let mut b = FakeArgs::new(&[1, -100, 5, 5]);
     assert_eq!(n::get_pdata_cbase(&h, &mut b), 0);
     assert_eq!(b.errors.len(), 1);
+}
+
+/// With the server's mirror (plugin API version 5): pointers come back as entities, writes land
+/// in the block, and the block's end and the server's link are guarded.
+#[test]
+fn pdata_cbase_reads_and_writes_the_mirror() {
+    let h = FakeHost::new();
+    h.pdata.borrow_mut().insert(1, vec![0; 0x3000]);
+    h.pdata.borrow_mut().insert(50, vec![0; 0x1000]);
+    // `m_pActiveItem` (int 639 on Windows, +5 on Linux) as the server mirrors it.
+    let linux = if cfg!(target_os = "linux") { 5 } else { 0 };
+    let active = (639 + linux) as usize * 4;
+    assert!(h.set_pdata_word(1, active, 0x3000, h.private_address(50) as u32));
+    assert_eq!(call(&h, n::get_pdata_cbase, &[1, 639, 5, 5]), 50);
+    assert_eq!(call(&h, n::get_pdata_cbase_safe, &[1, 639, 5, 5]), 50);
+    // NULL, and a pointer to no entity.
+    assert_eq!(call(&h, n::get_pdata_cbase, &[1, 600, 5, 5]), -1);
+    assert!(h.set_pdata_word(1, 600 * 4 + linux as usize * 4, 0x3000, 0xdead));
+    assert_eq!(call(&h, n::get_pdata_cbase, &[1, 600, 5, 5]), -1);
+    assert_eq!(call(&h, n::get_pdata_cbase_safe, &[1, 600, 5, 5]), -2);
+    // set_pdata_cbase writes the target's pointer, or NULL.
+    assert_eq!(call(&h, n::set_pdata_cbase, &[50, 28, 1, 4, 4]), 1);
+    assert_eq!(call(&h, n::get_pdata_cbase, &[50, 28, 4, 4]), 1);
+    assert_eq!(call(&h, n::set_pdata_cbase, &[50, 28, -1, 4, 4]), 1);
+    assert_eq!(call(&h, n::get_pdata_cbase, &[50, 28, 4, 4]), -1);
+    assert!(h.logs.borrow().is_empty(), "no note with the server's size");
+    // Past the end, and over the server's link: native errors, nothing written.
+    let mut a = FakeArgs::new(&[50, 0x1000, 0, 0]);
+    assert_eq!(n::get_pdata_cbase(&h, &mut a), 0);
+    assert_eq!(a.errors, ["Offset 4096 is past the end of entity 50's private data (4096 bytes)"]);
+    let mut b = FakeArgs::new(&[50, 1023, 1, 0, 0]);
+    assert_eq!(n::set_pdata_cbase(&h, &mut b), 1, "the last int");
+    let mut c = FakeArgs::new(&[50, 2, 1, 0, 0]);
+    assert_eq!(n::set_pdata_cbase(&h, &mut c), 0);
+    assert_eq!(c.errors, ["Offset 2 would overwrite the server's link to entity 50"]);
+    assert_eq!(h.pdata_word(50, 8, 0x1000), Some(0));
 }
 
 #[test]

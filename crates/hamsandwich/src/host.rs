@@ -6,7 +6,7 @@
 use crate::hooks::{FwdArg, FwdType, Ty, Val};
 use amxx::Cell;
 
-/// The server's entity hooks (`ts-plugin-api`'s entity hooks, version 4). Results are the API's codes
+/// The server's entity hooks (`ts-plugin-api`'s entity hooks, version 5) and private-data size. Results are the API's codes
 /// (`OK` 0, negative errors).
 pub trait HamApi {
     /// `ham_set_hook`: installs (true) or removes the module's single hook.
@@ -22,6 +22,8 @@ pub trait HamApi {
     /// `ham_execute` of `ham` on `this`: the return value and the arguments after the call
     /// (out parameters updated), or the API's error.
     fn execute(&self, ham: i32, this: i32, args: &[(Ty, Val)], ret: Ty, run_hooks: bool) -> Result<(Val, Vec<Val>), i32>;
+    /// `private_size` (version 5): the bytes of `ent`'s private data, or NOT_PLAYER.
+    fn private_size(&self, ent: i32) -> i32;
 }
 
 /// An entity as stock's `CHECK_ENTITY` sees it.
@@ -66,4 +68,14 @@ pub trait Host {
     /// Reads / writes field `field` (`HamItemInfo`) of a valid handle.
     fn item_info_get(&self, h: Cell, field: i32) -> Option<ItemVal>;
     fn item_info_set(&self, h: Cell, field: i32, v: ItemVal) -> bool;
+    /// The 32-bit word at byte `offset` of `ent`'s private data, `size` bytes long (the server's
+    /// `private_size`); `None` outside it.
+    fn pdata_word(&self, ent: i32, offset: usize, size: usize) -> Option<u32>;
+    /// Writes it: false outside the block.
+    fn set_pdata_word(&self, ent: i32, offset: usize, size: usize, value: u32) -> bool;
+    /// The address of `ent`'s private data (a C++ pointer to its object), 0 for none.
+    fn private_address(&self, ent: i32) -> usize;
+    /// The entity whose private data is at `addr` (stock's `TypeConversion.cbase_to_id`, by
+    /// `get_pdata_cbase_safe`'s scan of the edicts), if any.
+    fn entity_of_private(&self, addr: usize) -> Option<i32>;
 }

@@ -38,6 +38,9 @@ pub struct FakeHost {
     pub ran: RefCell<Vec<(i32, i32)>>,
     pub item_infos: RefCell<HashMap<Cell, [ItemVal; 11]>>,
     pub next_ii: StdCell<Cell>,
+    /// Private blocks by entity (the server's, plugin API version 5); entity `e`'s is at
+    /// `0x1000 * (e + 1)`.
+    pub pdata: RefCell<HashMap<i32, Vec<u8>>>,
 }
 
 impl FakeHost {
@@ -133,6 +136,9 @@ impl HamApi for FakeHost {
         let r = if run_hooks { self.game_call(ham, this, vals.clone()) } else { self.run(ham, this, &vals) };
         Ok((r, vals))
     }
+    fn private_size(&self, ent: i32) -> i32 {
+        self.pdata.borrow().get(&ent).map_or(api::NOT_PLAYER, |b| b.len() as i32)
+    }
 }
 
 impl Host for FakeHost {
@@ -182,6 +188,22 @@ impl Host for FakeHost {
     }
     fn item_info_set(&self, h: Cell, field: i32, v: ItemVal) -> bool {
         self.item_infos.borrow_mut().get_mut(&h).and_then(|f| f.get_mut(field as usize)).map(|x| *x = v).is_some()
+    }
+    fn pdata_word(&self, ent: i32, offset: usize, size: usize) -> Option<u32> {
+        let b = self.pdata.borrow();
+        let w = b.get(&ent)?.get(offset..offset.checked_add(4).filter(|&e| e <= size)?)?;
+        Some(u32::from_le_bytes([w[0], w[1], w[2], w[3]]))
+    }
+    fn set_pdata_word(&self, ent: i32, offset: usize, size: usize, value: u32) -> bool {
+        let mut b = self.pdata.borrow_mut();
+        let Some(end) = offset.checked_add(4).filter(|&e| e <= size) else { return false };
+        b.get_mut(&ent).and_then(|b| b.get_mut(offset..end)).map(|w| w.copy_from_slice(&value.to_le_bytes())).is_some()
+    }
+    fn private_address(&self, ent: i32) -> usize {
+        if self.pdata.borrow().contains_key(&ent) { 0x1000 * (ent as usize + 1) } else { 0 }
+    }
+    fn entity_of_private(&self, addr: usize) -> Option<i32> {
+        self.pdata.borrow().keys().copied().find(|&e| self.private_address(e) == addr)
     }
 }
 

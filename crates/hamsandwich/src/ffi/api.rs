@@ -204,4 +204,7 @@ impl HamApi for RealHamApi {
         let out = args.iter().zip(&call.args).map(|((t, _), a)| from_arg(*t, a)).collect();
         Ok((from_arg(ret, &call.ret), out))
     }
+    fn private_size(&self, ent: i32) -> i32 {
+        (self.0.private_size)(ent)
+    }
 }

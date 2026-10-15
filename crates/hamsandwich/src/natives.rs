@@ -60,7 +60,7 @@ fn check_function(host: &dyn Host, a: &mut dyn Args, func: Cell) -> Option<usize
     if !available(host, func as usize) {
         if host.api().is_none() {
             log_once(host, "noapi", || {
-                "this server has no TS plugin API version 4 (entity hooks): hamsandwich can't hook or call anything".into()
+                "this server has no TS plugin API version 5 (entity hooks): hamsandwich can't hook or call anything".into()
             });
         }
         return fail(error::FUNC_NOT_CONFIGURED, format!("Function {} is not configured in gamedata.", e.name));
@@ -699,28 +699,65 @@ fn pdata_offset(a: &mut dyn Args, offset_arg: usize, diff_arg: usize) -> Option<
 
 fn pdata_note(host: &dyn Host) {
     log_once(host, "pdata", || {
-        "get/set_pdata_cbase: TS's C++ private data offsets don't exist on the Rust server; reads give -1 (null), writes do nothing".into()
+        "get/set_pdata_cbase: the server has no TS plugin API (version 5), so its private data can't be checked; reads give -1 (null), \
+         writes do nothing"
+            .into()
     });
 }
 
-/// `get_pdata_cbase(id, offset, linuxdiff=5, macdiff=5)`: the Rust server's private data holds
-/// no C++ entity pointers, so this reads nothing and returns -1 (a null entry).
-pub fn get_pdata_cbase(host: &dyn Host, a: &mut dyn Args) -> Cell {
+/// Bytes 8..16 of the Rust server's private data hold its link to the entity
+/// (`ts_plugin_api::PluginApi::private_size`).
+const SERVER_LINK: core::ops::Range<usize> = 8..16;
+
+/// The size of `ent`'s private data from the server (plugin API version 5), `None` without it.
+fn pdata_size(host: &dyn Host, ent: Cell) -> Option<usize> {
+    usize::try_from(host.api()?.private_size(ent)).ok()
+}
+
+fn past_end(a: &mut dyn Args, ent: Cell, off: Cell, size: usize) {
+    a.error(&format!("Offset {off} is past the end of entity {ent}'s private data ({size} bytes)"));
+}
+
+/// `get_pdata_cbase(id, offset, linuxdiff=5, macdiff=5)` / `get_pdata_cbase_safe`: the entity
+/// whose object the pointer at `offset` (ints) points to, -1 for NULL. The Rust server's private
+/// data is no C++ object, but it mirrors the TS members plugins read at TS's offsets (plugin API
+/// version 5: a player's `m_pActiveItem`, the `weapon_tsgun`'s `m_pPlayer`). Port changes: the
+/// read is bounded by the block's size (a native error past it, where stock read past the
+/// object), and a pointer to no entity is -1 (`_safe`: -2, as stock) where stock's would have
+/// followed it.
+fn get_cbase(host: &dyn Host, a: &mut dyn Args, safe: bool) -> Cell {
     let ent = a.cell(1);
-    if !fm_check_entity(host, a, ent) || pdata_offset(a, 2, 3).is_none() {
+    if !fm_check_entity(host, a, ent) {
         return 0;
     }
-    pdata_note(host);
-    -1
+    let Some(off) = pdata_offset(a, 2, 3) else { return 0 };
+    let Some(size) = pdata_size(host, ent) else {
+        pdata_note(host);
+        return -1;
+    };
+    let Some(ptr) = host.pdata_word(ent, (off as usize).saturating_mul(4), size) else {
+        past_end(a, ent, off, size);
+        return 0;
+    };
+    if ptr == 0 {
+        return -1;
+    }
+    host.entity_of_private(ptr as usize).unwrap_or(if safe { -2 } else { -1 })
 }
 
-/// `get_pdata_cbase_safe(id, offset, linuxdiff=5, macdiff=5)`: likewise -1.
+pub fn get_pdata_cbase(host: &dyn Host, a: &mut dyn Args) -> Cell {
+    get_cbase(host, a, false)
+}
+
 pub fn get_pdata_cbase_safe(host: &dyn Host, a: &mut dyn Args) -> Cell {
-    get_pdata_cbase(host, a)
+    get_cbase(host, a, true)
 }
 
-/// `set_pdata_cbase(id, offset, value, linuxdiff=5, macdiff=5)`: checks as stock, writes nothing
-/// (it would overwrite the server's entity handle).
+/// `set_pdata_cbase(id, offset, value, linuxdiff=5, macdiff=5)`: writes the pointer to `value`'s
+/// object (NULL for -1) at `offset`, as stock. The server takes no pointer writes back (its
+/// mirror rewrites `m_pActiveItem` and `m_pPlayer`), so only what plugins read sees it. Port
+/// changes: bounded by the block's size, and the server's link (bytes 8..16) is refused, both
+/// native errors.
 pub fn set_pdata_cbase(host: &dyn Host, a: &mut dyn Args) -> Cell {
     let ent = a.cell(1);
     if !fm_check_entity(host, a, ent) {
@@ -731,9 +768,20 @@ pub fn set_pdata_cbase(host: &dyn Host, a: &mut dyn Args) -> Cell {
         return 0;
     }
     // The linux difference comes after the value here.
-    if pdata_offset(a, 2, 4).is_none() {
+    let Some(off) = pdata_offset(a, 2, 4) else { return 0 };
+    let Some(size) = pdata_size(host, ent) else {
+        pdata_note(host);
+        return 1;
+    };
+    let byte = (off as usize).saturating_mul(4);
+    if byte < SERVER_LINK.end && byte + 4 > SERVER_LINK.start {
+        a.error(&format!("Offset {off} would overwrite the server's link to entity {ent}"));
         return 0;
     }
-    pdata_note(host);
+    let value = if target == -1 { 0 } else { host.private_address(target) as u32 };
+    if !host.set_pdata_word(ent, byte, size, value) {
+        past_end(a, ent, off, size);
+        return 0;
+    }
     1
 }

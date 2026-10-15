@@ -85,6 +85,10 @@ player functions, the entity hooks (whose version 4 additions hamsandwich passes
   (the forward is `ET_STOP`) blocks the move. The repository's patched `include/tsfun.inc` drops
   the forwards' dummy `UNAVAILABLE` parameter and declares the native; tsx passes a 4th cell of 0,
   so plugins built against the stock file work too. Floats go as cells holding their bits.
+* **The private-data mirror**: the server writes TS 3.0 members plugins read into its entities'
+  private data at TS's offsets (the port's `docs/implementation/plugin-api.md` §4.1), so
+  fakemeta's `get_pdata_*` / `set_pdata_*` work unchanged; hamsandwich's `get_pdata_cbase` /
+  `set_pdata_cbase` read and write it within the block's size (`private_size`, section 8).
 
 Contract (`ts-plugin-api` docs and the port's `docs/implementation/plugin-api.md`): entity
 indices, engine thread only; `player_info` returns a snapshot refreshed each frame, so a getter
@@ -317,8 +321,21 @@ one of its own functions) are native errors.
 **ItemInfo**: handles are `ItemInfo *`, as stock. The module accepts only those it created or
 that a call in progress passed, so a bad handle is a native error instead of a crash.
 
-**pdata natives**: `get_pdata_cbase(_safe)` and `set_pdata_cbase` keep stock's checks but never
-touch the private data: -1 (null) and a no-op.
+**pdata natives**: `get_pdata_cbase(_safe)` and `set_pdata_cbase` keep stock's checks (the
+offset in ints, plus `linuxdiff` on Linux) and read or write the pointer at that offset, as stock.
+The Rust server's private data is no C++ object, but since plugin API version 5 it mirrors the TS
+members plugins read at TS's offsets (the port's `docs/implementation/plugin-api.md` §4.1: a
+player's `m_pActiveItem` at int 639 + 5, the `weapon_tsgun`'s `m_pPlayer` at int 28 + 4, its
+`m_iId`, clip, weapon id, reserves and weapon records, and `pev`), so `get_pdata_cbase(id, 639)`
+is the player's `weapon_tsgun`. A pointer becomes an entity by finding the edict whose private
+data it is (stock `_safe`'s scan): NULL is -1, a pointer to no entity -1 (`_safe`: -2, as stock;
+stock's plain native would have followed it). Port changes: the access is bounded by the block's
+size from the server (`private_size`), past it a native error where stock read or wrote past the
+object, and `set_pdata_cbase` refuses bytes 8..16, the server's link to the entity (a native
+error). The server takes no pointer writes back (its mirror rewrites them). Without the API: -1
+and a no-op, with one log line. fakemeta's `get_pdata_int` / `set_pdata_int` / `get_pdata_ent`
+are stock's and work on the same mirror (writes to the reserves and clips go back into the
+game).
 
 **Version 4's hooks** need nothing new in the dispatcher: the server reports the gun's
 `Item_*` / `Weapon_*` functions (and `Ham_TS_Weapon_AlternateAttack`) as supported for the
@@ -339,7 +356,11 @@ for functions missing from its gamedata.
 are closures calling natives) and the server (a tiny game with health, following the hook
 protocol): parameter changes, supercede and the last-result return rule, override in post,
 `SetHamParamEntity` vs `Entity2`, nested `ExecuteHamB` from a forward, ExecuteHam without hooks,
-type errors, ItemInfo, pdata. `e2e/ham_e2e.sma` hooks Spawn, TakeDamage (pre and post), Killed,
-Touch and Think on a live server and checks health after halved and superceded damage; on a
-version 4 server also `Ham_Item_PreFrame` on `weapon_tsgun` (a player owner) and
-`Ham_TS_GiveSlowMul`'s float in a post hook.
+type errors, ItemInfo, pdata (with and without the server's mirror: pointers to entities, NULL, a
+pointer to nothing, the block's end, the server's link). `e2e/ham_e2e.sma` hooks Spawn,
+TakeDamage (pre and post), Killed, Touch and Think on a live server and checks health after
+halved and superceded damage, `Ham_Item_PreFrame` on `weapon_tsgun` (a player owner),
+`Ham_TS_GiveSlowMul`'s float in a post hook, and the private-data mirror: `get_pdata_cbase` /
+`_safe` / fakemeta's `get_pdata_ent` of `m_pActiveItem` (the player's `weapon_tsgun`), its
+`m_pPlayer` back, `get_pdata_int` of its `m_iId` (16), a reserve written with `set_pdata_int`
+taken by the game and a written `m_iId` overwritten.

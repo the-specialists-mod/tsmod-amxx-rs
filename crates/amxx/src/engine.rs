@@ -271,6 +271,36 @@ impl Edict {
         !self.is_null() && !unsafe { (*self.0).pvPrivateData }.is_null()
     }
 
+    /// The address of the private data (what a C++ pointer to the entity's object holds), 0 for
+    /// none.
+    pub fn private_address(self) -> usize {
+        // SAFETY: as in `field!`.
+        if self.is_null() { 0 } else { unsafe { (*self.0).pvPrivateData as usize } }
+    }
+
+    /// The 32-bit word at byte `offset` of the private data, when `offset + 4 <= size`: `size` is
+    /// the block's size as the game reports it (the Rust server's `PluginApi::private_size`).
+    /// `None` without private data or outside `size`.
+    pub fn private_word(self, offset: usize, size: usize) -> Option<u32> {
+        if !self.has_private_data() || offset.checked_add(4).is_none_or(|end| end > size) {
+            return None;
+        }
+        // SAFETY: the game allocated at least `size` bytes at `pvPrivateData` (its API's
+        // contract) and `offset + 4 <= size`; an unaligned copy, on the engine's thread.
+        Some(unsafe { (*self.0).pvPrivateData.cast::<u8>().add(offset).cast::<u32>().read_unaligned() })
+    }
+
+    /// Writes the 32-bit word at byte `offset` of the private data, as [`private_word`](Self::private_word)
+    /// reads it: false (nothing written) without private data or outside `size`.
+    pub fn set_private_word(self, offset: usize, size: usize, value: u32) -> bool {
+        if !self.has_private_data() || offset.checked_add(4).is_none_or(|end| end > size) {
+            return false;
+        }
+        // SAFETY: as in `private_word`; a plain store into the game's block.
+        unsafe { (*self.0).pvPrivateData.cast::<u8>().add(offset).cast::<u32>().write_unaligned(value) };
+        true
+    }
+
     field!(/// `pev->flags`.
         flags: i32 = flags);
     field!(/// `pev->frags`.

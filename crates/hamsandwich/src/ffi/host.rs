@@ -274,4 +274,21 @@ impl Host for RealHost {
             _ => false,
         }
     }
+
+    fn pdata_word(&self, ent: i32, offset: usize, size: usize) -> Option<u32> {
+        engine()?.edict(ent).private_word(offset, size)
+    }
+
+    fn set_pdata_word(&self, ent: i32, offset: usize, size: usize, value: u32) -> bool {
+        engine().is_some_and(|e| e.edict(ent).set_private_word(offset, size, value))
+    }
+
+    fn private_address(&self, ent: i32) -> usize {
+        engine().map_or(0, |e| e.edict(ent).private_address())
+    }
+
+    fn entity_of_private(&self, addr: usize) -> Option<i32> {
+        let e = engine()?;
+        (0..e.max_entities()).find(|&i| e.edict(i).private_address() == addr)
+    }
 }
