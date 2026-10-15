@@ -160,6 +160,28 @@ impl Entry {
     }
 }
 
+/// `Ham_TS_GiveSlowMul`'s number.
+pub const TS_GIVESLOWMUL: usize = 123;
+
+/// The port's `Ham_TS_GiveSlowMul`: it returns its float (the-specialistsmod-rs plugin API
+/// version 4), where stock declares `Void_Void` (port addition).
+static GIVE_SLOW_MUL: Entry = Entry::new("Ham_TS_GiveSlowMul", "ts_giveslowmul", Ty::Float, &[]);
+
+/// The signature the server's entity hooks use for `ham`: stock's ([`HOOKS`]), except the port's
+/// deviations (`Ham_TS_GiveSlowMul` returns a float).
+pub fn entry(ham: usize) -> Option<&'static Entry> {
+    if ham == TS_GIVESLOWMUL {
+        return Some(&GIVE_SLOW_MUL);
+    }
+    crate::hooklist::HOOKS.get(ham)
+}
+
+/// `ham`'s return differs from stock's: `ExecuteHam` takes the result's out parameter if the
+/// plugin passes one (a stock-compiled call has none).
+pub fn ret_deviates(ham: usize) -> bool {
+    ham == TS_GIVESLOWMUL
+}
+
 /// `HAM_*` results.
 pub mod result {
     pub const UNSET: i32 = 0;

@@ -4,7 +4,6 @@
 //! the hook the server calls, and [`HamApi`] for the natives.
 
 use super::host::RealHost;
-use crate::hooklist::HOOKS;
 use crate::hooks::{Ty, Val};
 use crate::host::HamApi;
 use crate::state::{self, Action};
@@ -112,7 +111,7 @@ unsafe extern "C" fn hook(call: *mut HamCall, post: c_int) -> c_int {
     // SAFETY: the server passes the call it is running, valid and exclusively ours during the
     // hook.
     let Some(call) = (unsafe { call.as_mut() }) else { return ham::action::CONTINUE };
-    let Some(entry) = usize::try_from(call.ham).ok().and_then(|h| HOOKS.get(h)) else { return ham::action::CONTINUE };
+    let Some(entry) = usize::try_from(call.ham).ok().and_then(crate::hooks::entry) else { return ham::action::CONTINUE };
     let n = (call.argc.max(0) as usize).min(entry.args.len()).min(ham::MAX_ARGS);
     let args: Vec<Val> = entry.args[..n].iter().zip(&call.args[..n]).map(|(&t, a)| from_arg(t, a)).collect();
     let host = RealHost;
@@ -162,7 +161,7 @@ fn set_ret(call: &mut HamCall, t: Ty, v: &Val) {
 /// [`HamApi`] over the table.
 pub struct RealHamApi(pub &'static PluginApi);
 // SAFETY: the server's table is static for the life of the game library and only read; since
-// version 3 it also holds the engine's table and globals pointers, which this module never uses.
+// version 3 on it also holds the engine's table and globals pointers, which this module never uses.
 // Everything runs on the engine's thread.
 unsafe impl Sync for RealHamApi {}
 // SAFETY: as above.

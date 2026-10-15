@@ -21,6 +21,7 @@ pub const KILLED: i32 = 11;
 pub const THINK: i32 = 41;
 pub const TOUCH: i32 = 42;
 pub const CENTER: i32 = 48;
+pub const GIVESLOWMUL: i32 = 123;
 pub const PLAYER: i32 = 1;
 pub const BREAKABLE: i32 = 2;
 
@@ -78,13 +79,14 @@ impl FakeHost {
                 Val::Void
             }
             CENTER => Val::Vector([1.0, 2.0, 3.0]),
+            GIVESLOWMUL => Val::Float(0.5),
             _ => Val::Void,
         }
     }
 
     /// The game calling `ham` on `this` (hooks run when watched).
     pub fn game_call(&self, ham: i32, this: i32, args: Vec<Val>) -> Val {
-        let ret_ty = crate::hooklist::HOOKS[ham as usize].ret;
+        let ret_ty = crate::hooks::entry(ham as usize).map_or(Ty::Void, |e| e.ret);
         if !self.watched.borrow().contains(&ham) {
             return self.run(ham, this, &args);
         }
@@ -103,7 +105,7 @@ impl FakeHost {
 impl HamApi for FakeHost {
     fn set_hook(&self, _on: bool) {}
     fn watch(&self, ham: i32, on: bool) -> i32 {
-        if ![SPAWN, TAKEDAMAGE, KILLED, THINK, TOUCH, CENTER].contains(&ham) {
+        if ![SPAWN, TAKEDAMAGE, KILLED, THINK, TOUCH, CENTER, GIVESLOWMUL].contains(&ham) {
             return api::UNSUPPORTED;
         }
         let mut w = self.watched.borrow_mut();

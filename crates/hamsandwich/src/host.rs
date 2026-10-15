@@ -6,7 +6,7 @@
 use crate::hooks::{FwdArg, FwdType, Ty, Val};
 use amxx::Cell;
 
-/// The server's entity hooks (`ts-plugin-api`'s entity hooks, version 3). Results are the API's codes
+/// The server's entity hooks (`ts-plugin-api`'s entity hooks, version 4). Results are the API's codes
 /// (`OK` 0, negative errors).
 pub trait HamApi {
     /// `ham_set_hook`: installs (true) or removes the module's single hook.

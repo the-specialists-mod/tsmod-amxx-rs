@@ -236,6 +236,17 @@ fn execute_ham_and_execute_ham_b() {
     assert_eq!(n::execute_ham(&h, &mut v), 1);
     assert_eq!(v.memory[out as usize], [f(1.0), f(2.0), f(3.0)]);
 
+    // The port's `Ham_TS_GiveSlowMul` returns its float: into an out parameter when the plugin
+    // passes one, and a stock-compiled call without one still runs.
+    let mut slow = FakeArgs::new(&[]);
+    let out = slow.alloc(vec![0]);
+    slow.params = vec![GIVESLOWMUL, 1, out];
+    assert_eq!(n::execute_ham(&h, &mut slow), 1);
+    assert_eq!(slow.memory[out as usize], [f(0.5)]);
+    let mut stock = FakeArgs::new(&[GIVESLOWMUL, 1]);
+    assert_eq!(n::execute_ham(&h, &mut stock), 1);
+    assert!(stock.errors.is_empty(), "{:?}", stock.errors);
+
     // Arguments and entities are checked as stock.
     let mut short = FakeArgs::new(&[TAKEDAMAGE, 1]);
     assert_eq!(n::execute_ham(&h, &mut short), 0);

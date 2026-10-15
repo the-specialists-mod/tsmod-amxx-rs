@@ -18,6 +18,9 @@ new Float:g_post_damage;
 new g_post_orig, g_post_status;
 new g_filter_err = -1;
 new g_think_ent;
+// Plugin API v4 (the-specialistsmod-rs#99): the gun's functions on weapon_tsgun and the queries.
+new g_preframes, g_preframe_bad, g_slowmul;
+new Float:g_slowmul_ret = -1.0;
 
 check(const name[], ok, const detail[] = "")
 {
@@ -53,6 +56,10 @@ public plugin_init()
 	RegisterHam(Ham_TakeDamage, "player", "fw_td_post", 1);
 	RegisterHam(Ham_Killed, "player", "fw_killed");
 	RegisterHam(Ham_Touch, "player", "fw_touch");
+	if (IsHamValid(Ham_Item_PreFrame)) {
+		RegisterHam(Ham_Item_PreFrame, "weapon_tsgun", "fw_preframe");
+		RegisterHam(Ham_TS_GiveSlowMul, "player", "fw_slowmul_post", 1);
+	}
 	set_task(15.0, "t_valid");
 	set_task(20.0, "t_damage");
 	set_task(22.0, "t_think_setup");
@@ -64,6 +71,21 @@ public fw_spawn_post(id) { g_spawns++; }
 public fw_killed(victim, attacker, shouldgib) { g_killed++; }
 public fw_touch(id, other) { g_touches++; }
 public fw_think(ent) { if (ent == g_think_ent) g_thinks++; }
+
+// The gun's ItemPreFrame: `this` is a weapon_tsgun whose owner is a player.
+public fw_preframe(gun)
+{
+	new owner = entity_get_edict(gun, EV_ENT_owner);
+	if (owner < 1 || owner > get_maxplayers()) g_preframe_bad++;
+	g_preframes++;
+}
+
+// The port's Ham_TS_GiveSlowMul returns its float (stock declares it void).
+public fw_slowmul_post(id)
+{
+	g_slowmul++;
+	GetHamReturnFloat(g_slowmul_ret);
+}
 
 public fw_td_pre(victim, inflictor, attacker, Float:damage, bits)
 {
@@ -169,6 +191,14 @@ public t_events()
 	check("takedamage_by_game", g_td_pre > 3 && g_td_post > 3, d);
 	if (g_think_ent)
 		check("think", g_thinks > 0, d);
+	if (!IsHamValid(Ham_Item_PreFrame)) {
+		skip("gun_hooks", "the server has no plugin API v4 (Item_*/Weapon_* hooks)");
+		return;
+	}
+	formatex(d, charsmax(d), "preframes=%d bad=%d slowmul=%d ret=%.3f", g_preframes, g_preframe_bad, g_slowmul, g_slowmul_ret);
+	log_to_file(LOG, "v4: %s", d);
+	check("item_preframe", g_preframes > 0 && g_preframe_bad == 0, d);
+	check("giveslowmul_float", g_slowmul > 0 && g_slowmul_ret > 0.0 && g_slowmul_ret <= 2.0, d);
 }
 
 public t_finish()

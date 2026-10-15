@@ -10,7 +10,7 @@
 //! `result`), the function unless `result` reached `HAM_SUPERCEDE`, post forwards, then returns
 //! the plugins' value when the *last* forward that ran said `HAM_OVERRIDE` or more
 //! (`thisresult`), else the function's. Here the server calls [`pre`] and [`post`] around its own
-//! function (`ts-plugin-api`'s entity hooks, version 3); the state lives in a [`Frame`] per call, on a stack, so
+//! function (`ts-plugin-api`'s entity hooks, version 4); the state lives in a [`Frame`] per call, on a stack, so
 //! nested calls (a forward dealing damage, `ExecuteHamB`) work as in stock. The server calls
 //! post exactly when it called pre, innermost first, so post belongs to the top frame.
 //!
@@ -215,7 +215,7 @@ fn run_forwards(host: &dyn Host, post: bool) {
 /// Before the server runs `ham` on `this`: pushes the call and runs the pre forwards. The
 /// arguments the function should get are in the returned frame's parameters.
 pub fn pre(host: &dyn Host, ham: usize, this: i32, class: i32, args: Vec<Val>) -> (Action, Vec<Val>) {
-    let Some(entry) = HOOKS.get(ham) else { return (Action::Continue, args) };
+    let Some(entry) = crate::hooks::entry(ham) else { return (Action::Continue, args) };
     let mut params = vec![Param::new(Ty::Cbase, Val::Ent(this))];
     params.extend(entry.args.iter().zip(args).map(|(&t, v)| Param::new(t, v)));
     let frame = Frame {

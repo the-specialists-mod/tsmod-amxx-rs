@@ -60,7 +60,7 @@ fn check_function(host: &dyn Host, a: &mut dyn Args, func: Cell) -> Option<usize
     if !available(host, func as usize) {
         if host.api().is_none() {
             log_once(host, "noapi", || {
-                "this server has no TS plugin API version 3 (entity hooks): hamsandwich can't hook or call anything".into()
+                "this server has no TS plugin API version 4 (entity hooks): hamsandwich can't hook or call anything".into()
             });
         }
         return fail(error::FUNC_NOT_CONFIGURED, format!("Function {} is not configured in gamedata.", e.name));
@@ -181,8 +181,10 @@ fn cells(v: [f32; 3]) -> [Cell; 3] {
 fn execute(host: &dyn Host, a: &mut dyn Args, run_hooks: bool) -> Cell {
     let func = a.cell(1);
     let Some(ham) = check_function(host, a, func) else { return 0 };
-    let e = &HOOKS[ham];
-    let need = e.args.len() + e.ret.execute_ret_params() + 2;
+    let Some(e) = crate::hooks::entry(ham) else { return 0 };
+    // A deviating return's out parameter is optional (a stock-compiled call doesn't pass one).
+    let ret_params = if crate::hooks::ret_deviates(ham) { 0 } else { e.ret.execute_ret_params() };
+    let need = e.args.len() + ret_params + 2;
     if a.count() < need {
         a.error(&format!("Bad arg count.  Expected {need}, got {}.", a.count()));
         return 0;
@@ -249,7 +251,9 @@ fn execute(host: &dyn Host, a: &mut dyn Args, run_hooks: bool) -> Cell {
     let out_at = 3 + e.args.len();
     match (e.ret, ret) {
         (Ty::Float, Val::Float(f)) => {
-            a.set_ref(out_at, f.to_bits() as Cell);
+            if a.count() >= out_at {
+                a.set_ref(out_at, f.to_bits() as Cell);
+            }
             1
         }
         (Ty::Vector, Val::Vector(v)) => {

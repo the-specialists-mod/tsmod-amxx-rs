@@ -56,15 +56,17 @@ Hooks (as upstream): pre `ClientDisconnect`, `ServerDeactivate`; post `ClientCon
 The Rust server exports tier1's `CreateInterface`. tsx asks metamod for the game library's path
 (`GET_GAME_INFO(PLID, GINFO_REALDLL_FULLPATH)`), finds the export in the already loaded library
 (`dlopen(RTLD_NOLOAD)` + `dlsym` on Linux; `GetModuleHandleA` + `GetProcAddress` on Windows,
-retrying with the bare file name) and calls it with `TSRS_PluginApi003` (version 3,
-the-specialistsmod-rs#104). The name carries the version and versions aren't compatible, so a
-server with another version answers NULL; a table whose `version` isn't 3 or whose `size` is
+retrying with the bare file name) and calls it with `TSRS_PluginApi004` (version 4,
+the-specialistsmod-rs#117 and #99). The name carries the version and versions aren't compatible, so a
+server with another version answers NULL; a table whose `version` isn't 4 or whose `size` is
 smaller than this build's `PluginApi` is refused too (`amxx::tsapi::find`). The lookup runs at `AMXX_PluginsLoaded`
 and again at each `ServerActivate` until it succeeds; a server without the API gets one warning
 in the AMX Mod X log.
 
-tsx and hamsandwich both need version 3; the modules use none of version 3's additions (bots,
-entity info, host services) yet, only what version 2 had, unchanged in meaning (section 8).
+tsx and hamsandwich both need version 4; the modules use none of version 3's additions (bots,
+entity info, host services) or version 4's (team scores, objectives, entity creation), only the
+player functions and the entity hooks, whose version 4 additions hamsandwich passes through
+(section 8: the gun's functions, the queries, `Ham_TS_GiveSlowMul`'s float).
 
 Contract (`ts-plugin-api` docs and the port's `docs/implementation/plugin-api.md`): entity
 indices, engine thread only; `player_info` returns a snapshot refreshed each frame, so a getter
@@ -227,7 +229,16 @@ that a call in progress passed, so a bad handle is a native error instead of a c
 **pdata natives**: `get_pdata_cbase(_safe)` and `set_pdata_cbase` keep stock's checks but never
 touch the private data: -1 (null) and a no-op.
 
-**Without API version 3** the module loads, logs one warning and registers its natives;
+**Version 4's hooks** need nothing new in the dispatcher: the server reports the gun's
+`Item_*` / `Weapon_*` functions (and `Ham_TS_Weapon_AlternateAttack`) as supported for the
+`weapon_tsgun` class, `this` being the player's `weapon_tsgun` (its owner the player), and the
+query functions (`ObjectCaps`, `IsPlayer`, `Center`, ...) now fire, so `RegisterHam` works for them
+as for any other. One deviation from stock: the port's `Ham_TS_GiveSlowMul` returns its float
+(stock declares it `Void_Void`), so `hooks::entry` gives it a `Float` return:
+`GetHamReturnFloat` / `SetHamReturnFloat` work in its hooks, and `ExecuteHam` writes the result to
+an out parameter if the plugin passes one (a stock-compiled call without one still runs).
+
+**Without API version 4** the module loads, logs one warning and registers its natives;
 `IsHamValid` is 0 and `RegisterHam`/`ExecuteHam` fail through `__fatal_ham_error` as stock does
 for functions missing from its gamedata.
 
@@ -236,4 +247,6 @@ are closures calling natives) and the server (a tiny game with health, following
 protocol): parameter changes, supercede and the last-result return rule, override in post,
 `SetHamParamEntity` vs `Entity2`, nested `ExecuteHamB` from a forward, ExecuteHam without hooks,
 type errors, ItemInfo, pdata. `e2e/ham_e2e.sma` hooks Spawn, TakeDamage (pre and post), Killed,
-Touch and Think on a live server and checks health after halved and superceded damage.
+Touch and Think on a live server and checks health after halved and superceded damage; on a
+version 4 server also `Ham_Item_PreFrame` on `weapon_tsgun` (a player owner) and
+`Ham_TS_GiveSlowMul`'s float in a post hook.

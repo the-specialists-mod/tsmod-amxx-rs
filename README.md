@@ -18,14 +18,14 @@ the weapon in hand.
 |---|---|---|---|
 | TSX | `tsx`, class `xstats` | `tsx_amxx_i386.so` / `tsx_amxx.dll` | All the TS natives, the stats natives, `client_damage` / `client_death`, the rank. A metamod plugin too. |
 | TSFun Wrapper | `tsfun` | `tsfun_amxx_i386.so` / `tsfun_amxx.dll` | Empty, as upstream: lets plugins with `#include <tsfun>` (`#pragma reqlib tsfun`) load. |
-| Ham Sandwich | `hamsandwich` | `hamsandwich_amxx_i386.so` / `hamsandwich_amxx.dll` | `RegisterHam`, `ExecuteHam` and the rest, over the server's entity hooks (plugin API version 3). Replaces AMX Mod X's file of the same name. A metamod plugin too. |
+| Ham Sandwich | `hamsandwich` | `hamsandwich_amxx_i386.so` / `hamsandwich_amxx.dll` | `RegisterHam`, `ExecuteHam` and the rest, over the server's entity hooks (plugin API version 4, including the gun's `Item_*` / `Weapon_*` functions on `weapon_tsgun`). Replaces AMX Mod X's file of the same name. A metamod plugin too. |
 
 ## Requirements
 
 * The Rust TS server ([the-specialistsmod-rs](https://github.com/the-specialists-mod/the-specialistsmod-rs))
   on Linux or Windows, with the plugin API (`main` from `f585a02` on; releases after v0.2.0).
   Older builds work too, but the natives that change players do nothing (see below).
-  Both modules need version 3 of the API (`TSRS_PluginApi003`, the-specialistsmod-rs#104); a
+  Both modules need version 4 of the API (`TSRS_PluginApi004`, the-specialistsmod-rs#117, #99); a
   server with an older API, or the older modules on a newer server, find no table. Without it,
   `IsHamValid` is false and `RegisterHam`/`ExecuteHam` fail as stock does for functions missing
   from its gamedata.
