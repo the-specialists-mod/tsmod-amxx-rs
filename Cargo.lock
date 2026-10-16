@@ -80,7 +80,7 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 [[package]]
 name = "goldsrc"
 version = "3.0.6"
-source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?tag=v3.0.6#b22a295d736f969ee4d6897445d4a0e8ae0c78bf"
+source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=ed64e5070370d91e02e48574332a1673e2adaee8#ed64e5070370d91e02e48574332a1673e2adaee8"
 dependencies = [
  "goldsrc-sys",
 ]
@@ -88,7 +88,7 @@ dependencies = [
 [[package]]
 name = "goldsrc-sys"
 version = "3.0.6"
-source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?tag=v3.0.6#b22a295d736f969ee4d6897445d4a0e8ae0c78bf"
+source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=ed64e5070370d91e02e48574332a1673e2adaee8#ed64e5070370d91e02e48574332a1673e2adaee8"
 dependencies = [
  "bindgen",
 ]
@@ -251,7 +251,7 @@ dependencies = [
 [[package]]
 name = "shared"
 version = "3.0.6"
-source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?tag=v3.0.6#b22a295d736f969ee4d6897445d4a0e8ae0c78bf"
+source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=ed64e5070370d91e02e48574332a1673e2adaee8#ed64e5070370d91e02e48574332a1673e2adaee8"
 dependencies = [
  "goldsrc",
  "goldsrc-sys",
@@ -311,12 +311,12 @@ dependencies = [
 [[package]]
 name = "ts-gameplay"
 version = "3.0.6"
-source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?tag=v3.0.6#b22a295d736f969ee4d6897445d4a0e8ae0c78bf"
+source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=ed64e5070370d91e02e48574332a1673e2adaee8#ed64e5070370d91e02e48574332a1673e2adaee8"
 
 [[package]]
 name = "ts-plugin-api"
 version = "3.0.6"
-source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?tag=v3.0.6#b22a295d736f969ee4d6897445d4a0e8ae0c78bf"
+source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=ed64e5070370d91e02e48574332a1673e2adaee8#ed64e5070370d91e02e48574332a1673e2adaee8"
 
 [[package]]
 name = "tsfun"
