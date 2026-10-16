@@ -22,7 +22,7 @@ new g_pass, g_fail;
 new g_damage, g_death, g_death_named;
 new g_last_killer;
 new bool:g_api;
-new g_give_id;
+new g_give_id, g_give_space;
 new g_set_id;
 // AMX Mod X 1.8.2's Linux core calls the game library on a stack the Rust server can't take
 // (esp = 8 mod 16, then the server's SSE spills fault): its engclient_cmd crashes the server, so
@@ -32,7 +32,7 @@ new bool:g_no_engclient;
 new g_kn_thrower, g_kn_victim, g_kn_damage, g_kn_death, g_kn_tries;
 // tsfun.inc's forwards, fired from the server's plugin API v5 (tsmod-amxx-rs#8).
 new g_stunts, g_stunt_bad, g_pwups, g_pwup_id, g_pwup_last, g_melees, g_melee_bad, g_fuattack_ok;
-new g_pwup_target;
+new g_pwup_target, g_pwup_health, g_pwup_tries;
 
 check(const name[], ok, const detail[] = "")
 {
@@ -134,6 +134,7 @@ public client_powerup(id, powerup)
 	g_pwups++;
 	g_pwup_id = id;
 	g_pwup_last = powerup;
+	if (powerup == TSPWUP_HEALTH && !g_pwup_health) g_pwup_health = id;
 	if (g_pwups <= 3) log_to_file(LOG, "client_powerup: id=%d powerup=%d", id, powerup);
 }
 
@@ -145,6 +146,23 @@ public Melee_Attack(id, Float:time, Float:damage)
 	if (ts_set_fuattack(id, time, damage) == 1) g_fuattack_ok++;
 	if (g_melees <= 3) log_to_file(LOG, "Melee_Attack: id=%d time=%.2f damage=%.1f", id, time, damage);
 	return PLUGIN_CONTINUE;
+}
+
+Float:get_z(id)
+{
+	new Float:o[3];
+	entity_get_vector(id, EV_VEC_origin, o);
+	return o[2];
+}
+
+// TS hands over a gun only with the free slot weight for it (PickUpWeapon), so give to the
+// living player with the most room.
+roomiest_alive()
+{
+	new best, room = -1;
+	for (new i = 1; i <= get_maxplayers(); i++)
+		if (is_user_alive(i) && ts_getuserspace(i) > room) { best = i; room = ts_getuserspace(i); }
+	return best;
 }
 
 first_alive()
@@ -272,6 +290,7 @@ public t_pwup()
 	g_pwup_target = first_alive();
 	if (!g_pwup_target) { skip("client_powerup", "no living player"); return; }
 	g_pwup_id = 0;
+	g_pwup_health = 0;
 	new ent = ts_createpwup(TSPWUP_HEALTH);
 	if (!ent) { check("client_powerup", 0, "ts_createpwup failed"); return; }
 	// "create_pwup -> !wait! -> give_pwup" (upstream): a ts_powerup takes touches only once it has
@@ -287,15 +306,31 @@ public t_pwup()
 public t_pwup_give(const p[])
 {
 	if (!is_user_alive(g_pwup_target)) { skip("client_powerup", "player died"); return; }
-	if (is_valid_ent(p[0])) ts_givepwup(g_pwup_target, p[0]);
+	if (is_valid_ent(p[0])) {
+		new Float:o[3];
+		entity_get_vector(p[0], EV_VEC_origin, o);
+		log_to_file(LOG, "givepwup: ent=%d onground=%d z=%.0f, player z=%.0f", p[0],
+			(entity_get_int(p[0], EV_INT_flags) & FL_ONGROUND) != 0, o[2], get_z(g_pwup_target));
+		ts_givepwup(g_pwup_target, p[0]);
+	} else {
+		log_to_file(LOG, "givepwup: ent=%d gone", p[0]);
+	}
 	set_task(0.3, "t_pwup_check");
 }
 
 public t_pwup_check()
 {
-	new d[64];
-	formatex(d, charsmax(d), "target=%d id=%d powerup=%d", g_pwup_target, g_pwup_id, g_pwup_last);
-	check("client_powerup", g_pwup_id == g_pwup_target && g_pwup_last == TSPWUP_HEALTH, d);
+	new d[96];
+	formatex(d, charsmax(d), "target=%d health_to=%d last id=%d powerup=%d", g_pwup_target, g_pwup_health, g_pwup_id, g_pwup_last);
+	// A bot that walks over the dropped power-up first takes it (and fires the forward), and one
+	// that hasn't landed yet (dropped on a player in the air) takes no touch: try again.
+	if (g_pwup_health != g_pwup_target && ++g_pwup_tries < 3)
+	{
+		log_to_file(LOG, "client_powerup: %s, retrying", d);
+		t_pwup();
+		return;
+	}
+	check("client_powerup", g_pwup_health == g_pwup_target, d);
 }
 
 public t_getters()
@@ -361,8 +396,9 @@ public t_powerup_check()
 
 public t_give()
 {
-	g_give_id = first_alive();
+	g_give_id = roomiest_alive();
 	if (!g_give_id) { check("giveweapon", 0, "no living player"); return; }
+	g_give_space = ts_getuserspace(g_give_id);
 	new ok = ts_giveweapon(g_give_id, 13, 60, 0);
 	check("giveweapon_returns", ok == 1);
 	if (g_no_engclient) {
@@ -388,6 +424,11 @@ public t_give_check()
 		log_to_file(LOG, "giveweapon: %s, switching again", d);
 		engclient_cmd(id, "weapon_13");
 		set_task(0.3, "t_give_check");
+		return;
+	}
+	if (wpn != 13 && ts_getuserspace(id) == g_give_space) {
+		// The roomiest player had too little room for an AK47 (no slots taken): TS refused it.
+		skip("giveweapon_visible", d);
 		return;
 	}
 	// Without the API, tsx reads a bot's weapon from its player model (bots get no WeaponInfo).
