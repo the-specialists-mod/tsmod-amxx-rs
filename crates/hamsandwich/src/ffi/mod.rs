@@ -65,8 +65,9 @@ fn plugins_loaded() {
     match api::find() {
         Ok(_) => {}
         Err(why) => amxx::core::log(&format!(
-            "WARNING: no TS plugin API version 5 ({why}). Ham Sandwich needs a Rust TS server with entity hooks; until then \
-             RegisterHam and ExecuteHam fail as for functions missing from the gamedata."
+            "WARNING: no TS plugin API version {} ({why}). Ham Sandwich needs a Rust TS server with entity hooks; until then \
+             RegisterHam and ExecuteHam fail as for functions missing from the gamedata.",
+            ts_plugin_api::VERSION
         )),
     }
 }

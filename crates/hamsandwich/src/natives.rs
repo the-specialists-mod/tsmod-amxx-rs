@@ -60,7 +60,10 @@ fn check_function(host: &dyn Host, a: &mut dyn Args, func: Cell) -> Option<usize
     if !available(host, func as usize) {
         if host.api().is_none() {
             log_once(host, "noapi", || {
-                "this server has no TS plugin API version 5 (entity hooks): hamsandwich can't hook or call anything".into()
+                format!(
+                    "this server has no TS plugin API version {} (entity hooks): hamsandwich can't hook or call anything",
+                    ts_plugin_api::VERSION
+                )
             });
         }
         return fail(error::FUNC_NOT_CONFIGURED, format!("Function {} is not configured in gamedata.", e.name));
@@ -700,9 +703,11 @@ fn pdata_offset(a: &mut dyn Args, offset_arg: usize, diff_arg: usize) -> Option<
 
 fn pdata_note(host: &dyn Host) {
     log_once(host, "pdata", || {
-        "get/set_pdata_cbase: the server has no TS plugin API (version 5), so its private data can't be checked; reads give -1 (null), \
-         writes do nothing"
-            .into()
+        format!(
+            "get/set_pdata_cbase: the server has no TS plugin API (version {}), so its private data can't be checked; reads give -1 \
+             (null), writes do nothing",
+            ts_plugin_api::VERSION
+        )
     });
 }
 

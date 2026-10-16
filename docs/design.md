@@ -57,14 +57,16 @@ Hooks (as upstream): pre `ClientDisconnect`, `ServerDeactivate`; post `ClientCon
 The Rust server exports tier1's `CreateInterface`. tsx asks metamod for the game library's path
 (`GET_GAME_INFO(PLID, GINFO_REALDLL_FULLPATH)`), finds the export in the already loaded library
 (`dlopen(RTLD_NOLOAD)` + `dlsym` on Linux; `GetModuleHandleA` + `GetProcAddress` on Windows,
-retrying with the bare file name) and calls it with `TSRS_PluginApi005` (version 5,
-tsmod-amxx-rs#8, #10 and #15, the-specialistsmod-rs#197). The name carries the version and versions aren't compatible, so a
-server with another version answers NULL; a table whose `version` isn't 5 or whose `size` is
+retrying with the bare file name) and calls it with `TSRS_PluginApi006` (version 6; version 5
+was tsmod-amxx-rs#8, #10 and #15, the-specialistsmod-rs#197). The name carries the version and versions aren't compatible, so a
+server with another version answers NULL; a table whose `version` isn't 6 or whose `size` is
 smaller than this build's `PluginApi` is refused too (`amxx::tsapi::find`). The lookup runs at `AMXX_PluginsLoaded`
 and again at each `ServerActivate` until it succeeds; a server without the API gets one warning
 in the AMX Mod X log.
 
-tsx and hamsandwich both need version 5; the modules use none of version 3's additions (bots,
+tsx and hamsandwich both need version 6, though they use nothing it added (version 6 changed only
+what bot backends use: `run_cmd`, the per-frame queries, the damage and sound callbacks' arguments
+and the touch, shot and pickup callbacks; the modules' listener sets none of those). They use none of version 3's additions (bots,
 entity info, host services) or version 4's (team scores, objectives, entity creation), only the
 player functions, the entity hooks (whose version 4 additions hamsandwich passes through, section
 8: the gun's functions, the queries, `Ham_TS_GiveSlowMul`'s float) and version 5's:
@@ -396,7 +398,7 @@ as for any other. One deviation from stock: the port's `Ham_TS_GiveSlowMul` retu
 `ExecuteHam` writes the result to an out parameter if the plugin passes one (a stock-compiled call
 without one still runs).
 
-**Without API version 5** the module loads, logs one warning and registers its natives;
+**Without API version 6** the module loads, logs one warning and registers its natives;
 `IsHamValid` is 0 and `RegisterHam`/`ExecuteHam` fail through `__fatal_ham_error` as stock does
 for functions missing from its gamedata.
 

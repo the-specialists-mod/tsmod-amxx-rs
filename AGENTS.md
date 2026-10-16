@@ -138,7 +138,7 @@ change, compare `nm -D --defined-only` / `objdump -p`.
   `HamCall` address, which changes between pre and post (the server moves the struct). Stock decides the return by the *last* forward's result, not the
   highest; keep that.
 - **The plugin API is versioned, not append-only**: `amxx::tsapi::find` takes only the exact
-  version this build's `ts-plugin-api` has (5, `TSRS_PluginApi005`). A port API bump means
+  version this build's `ts-plugin-api` has (6, `TSRS_PluginApi006`). A port API bump means
   repinning the port crates and moving the modules in the same round.
 
 ## Git
