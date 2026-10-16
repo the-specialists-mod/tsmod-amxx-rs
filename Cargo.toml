@@ -8,14 +8,14 @@ version = "0.1.0"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/the-specialists-mod/tsmod-amxx-rs"
 
-# The port's crates, pinned to the commit with version 4 of the plugin API (`ts-plugin-api`,
-# the-specialistsmod-rs#117 and #99: team scores, objectives, entities from keys, the gun's and the
-# query functions' entity hooks) and its server implementation, on the port's main.
+# The port's crates, pinned to its v3.0.6 release: version 5 of the plugin API (`ts-plugin-api`,
+# the-specialistsmod-rs#197: listeners, the stunt/power-up/melee/kill callbacks and the
+# private-data mirror) and its server implementation.
 [workspace.dependencies]
-goldsrc-sys = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", rev = "38cd7b8bac90696415d40afe019507b9d28d42c4" }
-ts-plugin-api = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", rev = "38cd7b8bac90696415d40afe019507b9d28d42c4" }
+goldsrc-sys = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", tag = "v3.0.6" }
+ts-plugin-api = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", tag = "v3.0.6" }
 # Tests only: the port's message encoders, so the parsers are checked against the real wire code.
-shared = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", rev = "38cd7b8bac90696415d40afe019507b9d28d42c4" }
+shared = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", tag = "v3.0.6" }
 
 [profile.dev]
 panic = "abort" # unwinding across the C ABI is UB; be explicit

@@ -23,9 +23,8 @@ the weapon in hand.
 ## Requirements
 
 * The Rust TS server ([the-specialistsmod-rs](https://github.com/the-specialists-mod/the-specialistsmod-rs))
-  on Linux or Windows, with the plugin API (`main` from `f585a02` on; releases after v0.2.0).
-  Older builds work too, but the natives that change players do nothing (see below).
-  Both modules need version 5 of the API (`TSRS_PluginApi005`: kill reports, the tsfun
+  v3.0.6 or later, on Linux or Windows. Older builds work too, but the natives that change
+  players do nothing (see below). Both modules need version 5 of the API (`TSRS_PluginApi005`: kill reports, the tsfun
   forwards and the private-data mirror, tsmod-amxx-rs#8, #10, #15, the-specialistsmod-rs#197); a
   server with an older API, or the older modules on a newer server, find no table. Without it,
   `IsHamValid` is false and `RegisterHam`/`ExecuteHam` fail as stock does for functions missing
