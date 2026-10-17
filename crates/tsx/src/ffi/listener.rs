@@ -31,7 +31,7 @@ pub fn register(api: &'static PluginApi) {
     };
     // SAFETY: the server copies the descriptor during the call; its callbacks are this
     // library's, which stays loaded until `unregister` (at `AMXX_Detach`).
-    let h = unsafe { (api.add_listener)(&desc) };
+    let h = unsafe { (api.add_listener)(ts_plugin_api::NO_PLUGIN, &desc) };
     if h > 0 {
         HANDLE.store(h, Ordering::Relaxed);
         with(|s| s.kill_reports = true);

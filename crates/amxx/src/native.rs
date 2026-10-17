@@ -20,6 +20,12 @@ pub trait Args {
     }
     /// `MF_GetAmxString(amx, params[i], ...)`.
     fn string(&mut self, i: usize) -> String;
+    /// The string at `params[i]` as the plugin's bytes (each cell's low byte, up to the NUL),
+    /// without the UTF-8 conversion of [`string`](Self::string): for text the game takes as bytes
+    /// (a bot's name, a client command).
+    fn string_bytes(&mut self, i: usize) -> Vec<u8> {
+        self.string(i).into_bytes()
+    }
     /// `MF_SetAmxString(amx, params[i], s, max)`: copies at most `max` characters and returns
     /// how many it copied.
     fn set_string(&mut self, i: usize, s: &str, max: Cell) -> Cell;
@@ -69,6 +75,27 @@ impl Args for AmxArgs<'_> {
         let mut len = 0;
         // SAFETY: as in `addr`; buffer 0 is the core's scratch buffer, copied out at once.
         unsafe { crate::core::cstr_lossy((c.get_amx_string)(self.amx, self.cell(i), 0, &mut len)) }
+    }
+
+    fn string_bytes(&mut self, i: usize) -> Vec<u8> {
+        let p = self.addr(i);
+        if p.is_null() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        // SAFETY: GetAmxAddr checked the address against the plugin's data section; a Pawn string
+        // is NUL-terminated inside it, and the read stops there (or at 64 KiB, a guard against a
+        // missing terminator).
+        unsafe {
+            while out.len() < 65536 {
+                let c = *p.add(out.len());
+                if c == 0 {
+                    break;
+                }
+                out.push(c as u8);
+            }
+        }
+        out
     }
 
     fn set_string(&mut self, i: usize, s: &str, max: Cell) -> Cell {
@@ -158,6 +185,8 @@ pub struct FakeArgs {
     pub params: Vec<Cell>,
     pub memory: Vec<Vec<Cell>>,
     pub errors: Vec<String>,
+    /// What [`Args::amx`] returns: the calling plugin.
+    pub amx: usize,
 }
 
 impl FakeArgs {
@@ -174,6 +203,16 @@ impl FakeArgs {
     /// Adds a string (plus NUL) and returns its address.
     pub fn alloc_str(&mut self, s: &str) -> Cell {
         self.alloc(s.bytes().map(Cell::from).chain([0]).collect())
+    }
+
+    /// Adds floats (as cells holding their bits) and returns their address.
+    pub fn alloc_floats(&mut self, v: &[f32]) -> Cell {
+        self.alloc(v.iter().map(|f| f.to_bits() as Cell).collect())
+    }
+
+    /// Reads back `n` floats stored at address `a`.
+    pub fn read_floats(&self, a: Cell, n: usize) -> Vec<f32> {
+        self.memory[a as usize].iter().take(n).map(|&c| f32::from_bits(c as u32)).collect()
     }
 
     /// Reads back the string stored at address `a`.
@@ -199,6 +238,11 @@ impl Args for FakeArgs {
     fn string(&mut self, i: usize) -> String {
         let a = self.cell(i);
         if (a as usize) < self.memory.len() { self.read_str(a) } else { String::new() }
+    }
+
+    fn string_bytes(&mut self, i: usize) -> Vec<u8> {
+        let a = self.cell(i);
+        self.memory.get(a as usize).map(|m| m.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect()).unwrap_or_default()
     }
 
     fn set_string(&mut self, i: usize, s: &str, max: Cell) -> Cell {
@@ -229,6 +273,10 @@ impl Args for FakeArgs {
 
     fn error(&mut self, msg: &str) {
         self.errors.push(msg.to_owned());
+    }
+
+    fn amx(&self) -> usize {
+        self.amx
     }
 }
 

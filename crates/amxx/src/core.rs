@@ -142,42 +142,122 @@ pub fn is_player_ingame(index: i32) -> bool {
     core().is_some_and(|c| unsafe { (c.is_player_ingame)(index) } != 0)
 }
 
-/// A forward handle from [`register_forward`].
+/// A forward handle from [`register_forward`] or [`register_forward_params`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Forward(pub i32);
 
+/// Most parameters a forward registered or executed through this crate has (AMX Mod X's own limit,
+/// `FORWARD_MAX_PARAMS`, is 32).
+pub const MAX_FORWARD_PARAMS: usize = 16;
+
+/// How a forward runs its plugins (`ForwardExecType`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExecType {
+    /// Every plugin; returns 0.
+    Ignore,
+    /// Stops at the first plugin returning more than 0 (`PLUGIN_HANDLED`) and returns that.
+    Stop,
+    /// Every plugin unless one returns `PLUGIN_HANDLED`; returns the biggest value.
+    Stop2,
+    /// Every plugin; returns the biggest value.
+    Continue,
+}
+
+impl ExecType {
+    fn raw(self) -> c_int {
+        match self {
+            ExecType::Ignore => ET_IGNORE,
+            ExecType::Stop => ET_STOP,
+            ExecType::Stop2 => ET_STOP2,
+            ExecType::Continue => ET_CONTINUE,
+        }
+    }
+}
+
+/// A forward parameter's type. Pass the matching [`FwdValue`] when executing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Param {
+    /// A cell ([`FwdValue::Cell`]).
+    Cell,
+    /// A `Float:` ([`FwdValue::Float`]). Registered as `FP_CELL` holding the float's bits:
+    /// `ExecuteForward` would read an `FP_FLOAT` vararg as a double.
+    Float,
+    /// A `const name[]` ([`FwdValue::Str`]).
+    String,
+    /// An array, `arr[]` / `Float:v[3]` ([`FwdValue::Array`] or, written back after each plugin,
+    /// [`FwdValue::ArrayRef`]).
+    Array,
+}
+
+impl Param {
+    fn raw(self) -> c_int {
+        match self {
+            Param::Cell | Param::Float => FP_CELL,
+            Param::String => FP_STRING,
+            Param::Array => FP_ARRAY,
+        }
+    }
+}
+
 /// `MF_RegisterForward(name, ET_IGNORE, FP_CELL x cells, FP_DONE)`: a multi-plugin forward with
 /// `cells` cell parameters (floats as cells holding their bits), the only kind TS's modules
-/// register. `None` before the core attached.
+/// register. `None` before the core attached or for more than [`MAX_FORWARD_PARAMS`] cells.
 pub fn register_forward(name: &CStr, cells: usize) -> Option<Forward> {
-    register_forward_exec(name, ET_IGNORE, cells)
+    register_forward_params(name, ExecType::Ignore, &vec![Param::Cell; cells])
 }
 
 /// [`register_forward`] with `ET_STOP`: [`execute_forward`] stops at the first plugin returning
 /// more than 0 (`PLUGIN_HANDLED`) and returns that, else 0.
 pub fn register_forward_stop(name: &CStr, cells: usize) -> Option<Forward> {
-    register_forward_exec(name, ET_STOP, cells)
+    register_forward_params(name, ExecType::Stop, &vec![Param::Cell; cells])
 }
 
-fn register_forward_exec(name: &CStr, exec: c_int, cells: usize) -> Option<Forward> {
-    let c = core()?;
-    let (f, n) = (c.register_forward, name.as_ptr());
-    const C: c_int = FP_CELL;
-    const D: c_int = FP_DONE;
-    // SAFETY: the variadic RegisterForward with the parameter types terminated by FP_DONE, as
-    // the SDK documents.
-    let id = unsafe {
-        match cells {
-            0 => f(n, exec, D),
-            1 => f(n, exec, C, D),
-            2 => f(n, exec, C, C, D),
-            3 => f(n, exec, C, C, C, D),
-            4 => f(n, exec, C, C, C, C, D),
-            5 => f(n, exec, C, C, C, C, C, D),
-            6 => f(n, exec, C, C, C, C, C, C, D),
-            _ => return None,
+/// The types as the core's varargs take them (`FP_*`), `None` past [`MAX_FORWARD_PARAMS`].
+fn raw_types(params: &[Param]) -> Option<Vec<c_int>> {
+    (params.len() <= MAX_FORWARD_PARAMS).then(|| params.iter().map(|p| p.raw()).collect())
+}
+
+/// Calls a C variadic function with the fixed arguments, then `$v[0..n]` for the slice's length
+/// (at most 16), then the optional terminator; evaluates to `None` for a longer slice.
+macro_rules! var_call {
+    ($f:expr, ($($fixed:expr),*), $v:expr $(, $done:expr)?) => {{
+        let v = $v;
+        match v.len() {
+            0 => Some($f($($fixed,)* $($done)?)),
+            1 => Some($f($($fixed,)* v[0] $(, $done)?)),
+            2 => Some($f($($fixed,)* v[0], v[1] $(, $done)?)),
+            3 => Some($f($($fixed,)* v[0], v[1], v[2] $(, $done)?)),
+            4 => Some($f($($fixed,)* v[0], v[1], v[2], v[3] $(, $done)?)),
+            5 => Some($f($($fixed,)* v[0], v[1], v[2], v[3], v[4] $(, $done)?)),
+            6 => Some($f($($fixed,)* v[0], v[1], v[2], v[3], v[4], v[5] $(, $done)?)),
+            7 => Some($f($($fixed,)* v[0], v[1], v[2], v[3], v[4], v[5], v[6] $(, $done)?)),
+            8 => Some($f($($fixed,)* v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7] $(, $done)?)),
+            9 => Some($f($($fixed,)* v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8] $(, $done)?)),
+            10 => Some($f($($fixed,)* v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9] $(, $done)?)),
+            11 => Some($f($($fixed,)* v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10] $(, $done)?)),
+            12 => Some($f($($fixed,)* v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11] $(, $done)?)),
+            13 => Some($f($($fixed,)* v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11], v[12] $(, $done)?)),
+            14 => Some($f($($fixed,)* v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11], v[12], v[13] $(, $done)?)),
+            15 => Some($f($($fixed,)* v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11], v[12], v[13], v[14] $(, $done)?)),
+            16 => Some($f($($fixed,)* v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11], v[12], v[13], v[14], v[15] $(, $done)?)),
+            _ => None,
         }
-    };
+    }};
+}
+
+/// `MF_RegisterForward(name, exec, types..., FP_DONE)`: a multi-plugin forward (every plugin with
+/// a public `name`) with typed parameters, up to [`MAX_FORWARD_PARAMS`]. Run it with
+/// [`execute_forward_values`]. `None` before the core attached or with too many parameters.
+///
+/// The core clears its forwards when the plugins unload (`ServerDeactivate`) and the module
+/// registers them again at `AMXX_PluginsLoaded`: forget the handle in `AMXX_PluginsUnloading`.
+pub fn register_forward_params(name: &CStr, exec: ExecType, params: &[Param]) -> Option<Forward> {
+    let c = core()?;
+    let types = raw_types(params)?;
+    let (f, n, e) = (c.register_forward, name.as_ptr(), exec.raw());
+    // SAFETY: the variadic RegisterForward with up to 16 `FP_*` types (ints) terminated by
+    // FP_DONE, as the SDK documents.
+    let id = unsafe { var_call!(f, (n, e), &types[..], FP_DONE) }?;
     Some(Forward(id))
 }
 
@@ -188,7 +268,7 @@ pub fn execute_forward(fwd: Forward, cells: &[Cell]) -> i32 {
     execute_raw(fwd.0, &args)
 }
 
-/// `ExecuteForward` with up to 10 pointer-sized values: cells, string pointers (`FP_STRING`)
+/// `ExecuteForward` with up to 16 pointer-sized values: cells, string pointers (`FP_STRING`)
 /// and prepared array ids (`FP_ARRAY`). Floats must be passed as cells holding their bits (and
 /// the forward registered with `FP_CELL`): `ExecuteForward` reads `FP_FLOAT` as a double.
 fn execute_raw(id: c_int, a: &[isize]) -> i32 {
@@ -196,48 +276,60 @@ fn execute_raw(id: c_int, a: &[isize]) -> i32 {
     let f = c.execute_forward;
     // SAFETY: the variadic ExecuteForward with as many pointer-sized values as the forward has
     // parameters (the caller's contract); on i686 a cell, a pointer and isize are all 4 bytes.
-    unsafe {
-        match *a {
-            [] => f(id),
-            [a0] => f(id, a0),
-            [a0, a1] => f(id, a0, a1),
-            [a0, a1, a2] => f(id, a0, a1, a2),
-            [a0, a1, a2, a3] => f(id, a0, a1, a2, a3),
-            [a0, a1, a2, a3, a4] => f(id, a0, a1, a2, a3, a4),
-            [a0, a1, a2, a3, a4, a5] => f(id, a0, a1, a2, a3, a4, a5),
-            [a0, a1, a2, a3, a4, a5, a6] => f(id, a0, a1, a2, a3, a4, a5, a6),
-            [a0, a1, a2, a3, a4, a5, a6, a7] => f(id, a0, a1, a2, a3, a4, a5, a6, a7),
-            [a0, a1, a2, a3, a4, a5, a6, a7, a8] => f(id, a0, a1, a2, a3, a4, a5, a6, a7, a8),
-            [a0, a1, a2, a3, a4, a5, a6, a7, a8, a9] => f(id, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9),
-            _ => 0,
-        }
-    }
+    unsafe { var_call!(f, (id), a) }.unwrap_or(0)
 }
 
-/// A value for [`execute_sp_forward`].
+/// A value for [`execute_forward_values`] and [`execute_sp_forward`], matching the forward's
+/// [`Param`].
 pub enum FwdValue<'a> {
     Cell(Cell),
+    /// Passed as a cell holding the float's bits ([`Param::Float`]).
+    Float(f32),
     Str(&'a CStr),
     /// Copied into the plugin for the call (`MF_PrepareCellArrayA(.., false)`).
     Array(&'a mut [Cell]),
+    /// Copied in, and the plugin's changes copied back after each plugin runs
+    /// (`MF_PrepareCellArrayA(.., true)`): a by-reference array.
+    ArrayRef(&'a mut [Cell]),
+}
+
+/// `MF_PrepareCellArrayA(arr, len, copyback)`: the id an `FP_ARRAY` parameter takes.
+fn prepare(c: &CoreFns, arr: &mut [Cell], copyback: bool) -> isize {
+    // SAFETY: the array outlives the ExecuteForward that follows (the caller's borrow), where the
+    // core copies it in and, with `copyback`, back out; it is valid for `len` cells.
+    unsafe { (c.prepare_cell_array_a)(arr.as_mut_ptr(), arr.len() as core::ffi::c_uint, copyback) as isize }
+}
+
+/// The values as `ExecuteForward`'s varargs: arrays are prepared (the core keeps the pointer
+/// until the forward ran, so `values` must outlive that call).
+fn raw_values(c: &CoreFns, values: &mut [FwdValue]) -> Vec<isize> {
+    let mut args = Vec::with_capacity(values.len());
+    for v in values.iter_mut() {
+        args.push(match v {
+            FwdValue::Cell(x) => *x as isize,
+            FwdValue::Float(x) => x.to_bits() as Cell as isize,
+            FwdValue::Str(s) => s.as_ptr() as isize,
+            FwdValue::Array(arr) => prepare(c, arr, false),
+            FwdValue::ArrayRef(arr) => prepare(c, arr, true),
+        });
+    }
+    args
+}
+
+/// `MF_ExecuteForward` of a multi-plugin forward from [`register_forward_params`], one value per
+/// parameter; returns what the [`ExecType`] makes of the plugins' results (0 before the core
+/// attached, -1 for a stale handle). Plugins run inside: hold no module state across the call.
+pub fn execute_forward_values(fwd: Forward, values: &mut [FwdValue]) -> i32 {
+    let Some(c) = core() else { return 0 };
+    let args = raw_values(c, values);
+    execute_raw(fwd.0, &args)
 }
 
 /// `MF_ExecuteForward` of a single-plugin forward with mixed values; returns what the public
 /// returned.
 pub fn execute_sp_forward(id: i32, values: &mut [FwdValue]) -> i32 {
     let Some(c) = core() else { return 0 };
-    let mut args = Vec::with_capacity(values.len());
-    for v in values.iter_mut() {
-        args.push(match v {
-            FwdValue::Cell(x) => *x as isize,
-            FwdValue::Str(s) => s.as_ptr() as isize,
-            FwdValue::Array(arr) => {
-                // SAFETY: the array outlives the ExecuteForward below, where the core copies it.
-                let id = unsafe { (c.prepare_cell_array_a)(arr.as_mut_ptr(), arr.len() as core::ffi::c_uint, false) };
-                id as isize
-            }
-        });
-    }
+    let args = raw_values(c, values);
     execute_raw(id, &args)
 }
 
@@ -250,25 +342,22 @@ pub unsafe fn register_sp_forward(amx: usize, name: &str, types: &[core::ffi::c_
     let Some(c) = core() else { return -1 };
     let n = c_string(name);
     let (f, amx, n) = (c.register_sp_forward_by_name, amx as *mut Amx, n.as_ptr());
-    const D: core::ffi::c_int = FP_DONE;
-    // SAFETY: the variadic RegisterSPForwardByName with the parameter types terminated by
+    // SAFETY: the variadic RegisterSPForwardByName with up to 16 parameter types terminated by
     // FP_DONE; `amx` per the caller's contract.
-    unsafe {
-        match *types {
-            [] => f(amx, n, D),
-            [a] => f(amx, n, a, D),
-            [a, b] => f(amx, n, a, b, D),
-            [a, b, c2] => f(amx, n, a, b, c2, D),
-            [a, b, c2, d] => f(amx, n, a, b, c2, d, D),
-            [a, b, c2, d, e] => f(amx, n, a, b, c2, d, e, D),
-            [a, b, c2, d, e, g] => f(amx, n, a, b, c2, d, e, g, D),
-            [a, b, c2, d, e, g, h] => f(amx, n, a, b, c2, d, e, g, h, D),
-            [a, b, c2, d, e, g, h, i] => f(amx, n, a, b, c2, d, e, g, h, i, D),
-            [a, b, c2, d, e, g, h, i, j] => f(amx, n, a, b, c2, d, e, g, h, i, j, D),
-            [a, b, c2, d, e, g, h, i, j, k] => f(amx, n, a, b, c2, d, e, g, h, i, j, k, D),
-            _ => -1,
-        }
-    }
+    unsafe { var_call!(f, (amx, n), types, FP_DONE) }.unwrap_or(-1)
+}
+
+/// [`register_sp_forward`] with typed parameters (as [`register_forward_params`]): a forward to
+/// one plugin's public, run with [`execute_sp_forward`]; -1 if it has none by that name or with
+/// more than [`MAX_FORWARD_PARAMS`] parameters. The core drops single-plugin forwards with the
+/// plugins (`ServerDeactivate`), so forget the id in `AMXX_PluginsUnloading`.
+///
+/// # Safety
+/// `amx` is a plugin's AMX the core handed to a native (`Args::amx`), during the map it was given.
+pub unsafe fn register_sp_forward_params(amx: usize, name: &str, params: &[Param]) -> i32 {
+    let Some(types) = raw_types(params) else { return -1 };
+    // SAFETY: the caller's contract.
+    unsafe { register_sp_forward(amx, name, &types) }
 }
 
 /// `MF_UnregisterSPForward(id)`.

@@ -8,14 +8,15 @@ version = "0.2.0"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/the-specialists-mod/tsmod-amxx-rs"
 
-# The port's crates, pinned to its v3.0.7 release: version 6 of the plugin API (`ts-plugin-api`:
-# the bot backends' frame queries, run_cmd's result and the touch, damage, shot and pickup
-# callbacks) and its server implementation.
+# The port's crates, pinned to its v3.0.8 release: version 7 of the plugin API (`ts-plugin-api`:
+# plugin identities for metamod plugins, `attach_plugin`, so a Pawn plugin can be a bot backend;
+# listeners they own; the kung-fu and superjump snapshot flags and the frame's team scores) and its
+# server implementation.
 [workspace.dependencies]
-goldsrc-sys = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", tag = "v3.0.7" }
-ts-plugin-api = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", tag = "v3.0.7" }
+goldsrc-sys = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", tag = "v3.0.8" }
+ts-plugin-api = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", tag = "v3.0.8" }
 # Tests only: the port's message encoders, so the parsers are checked against the real wire code.
-shared = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", tag = "v3.0.7" }
+shared = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", tag = "v3.0.8" }
 
 [profile.dev]
 panic = "abort" # unwinding across the C ABI is UB; be explicit
@@ -26,3 +27,4 @@ opt-level = "z"
 lto = "fat"
 codegen-units = 1
 debug = true
+

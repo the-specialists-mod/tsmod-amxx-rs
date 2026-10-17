@@ -214,11 +214,75 @@ fn globals() -> Option<&'static mut MetaGlobals> {
     unsafe { GLOBALS.load(Ordering::Relaxed).as_mut() }
 }
 
+/// What a hook tells metamod (`META_RES`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MetaResult {
+    /// The plugin didn't act; the call goes on as if it wasn't there.
+    Ignored,
+    /// It acted, but the real function still runs and its result stands.
+    Handled,
+    /// The real function still runs, but the hook's return value is what the caller gets (the
+    /// last plugin to override wins). In a post hook: the hook's return replaces the result.
+    Override,
+    /// Pre hooks only: the real function (and later plugins' post hooks' `orig_ret`) is skipped;
+    /// the caller gets the hook's return value.
+    Supercede,
+}
+
+impl MetaResult {
+    fn raw(self) -> c_int {
+        match self {
+            MetaResult::Ignored => MRES_IGNORED,
+            MetaResult::Handled => MRES_HANDLED,
+            MetaResult::Override => MRES_OVERRIDE,
+            MetaResult::Supercede => MRES_SUPERCEDE,
+        }
+    }
+}
+
+/// `SET_META_RESULT(r)`: every hook must set a result or metamod complains. With
+/// [`MetaResult::Override`] or [`MetaResult::Supercede`] the value the hook function returns is
+/// the one used (metamod stores it as the override), so return it from the hook.
+pub fn set_result(r: MetaResult) {
+    if let Some(g) = globals() {
+        g.mres = r.raw();
+    }
+}
+
 /// `SET_META_RESULT(MRES_IGNORED)`: every hook must set a result or metamod complains.
 pub fn ignored() {
-    if let Some(g) = globals() {
-        g.mres = MRES_IGNORED;
+    set_result(MetaResult::Ignored);
+}
+
+/// `META_RESULT_STATUS`: the highest result the plugins before this one set for this call.
+pub fn status() -> Option<MetaResult> {
+    let g = globals()?;
+    match g.status {
+        MRES_IGNORED => Some(MetaResult::Ignored),
+        MRES_HANDLED => Some(MetaResult::Handled),
+        MRES_OVERRIDE => Some(MetaResult::Override),
+        MRES_SUPERCEDE => Some(MetaResult::Supercede),
+        _ => None,
     }
+}
+
+/// `META_RESULT_OVERRIDE_RET(int)`: in a hook of an int-returning function, the value an earlier
+/// plugin's `Override`/`Supercede` set, if one did.
+pub fn override_ret_int() -> Option<i32> {
+    let g = globals()?;
+    if !matches!(g.status, MRES_OVERRIDE | MRES_SUPERCEDE) {
+        return None;
+    }
+    // SAFETY: once a plugin overrode an int-returning call, metamod points `override_ret` at the
+    // stored int.
+    (!g.override_ret.is_null()).then(|| unsafe { *(g.override_ret as *const c_int) })
+}
+
+/// `META_RESULT_ORIG_RET(float)` in a post hook of a float-returning function.
+pub fn orig_ret_float() -> Option<f32> {
+    let g = globals()?;
+    // SAFETY: in a post hook of a function returning float, metamod points `orig_ret` at it.
+    (!g.orig_ret.is_null()).then(|| unsafe { *(g.orig_ret as *const f32) })
 }
 
 /// `META_RESULT_ORIG_RET(int)` in a post hook of an int-returning function.

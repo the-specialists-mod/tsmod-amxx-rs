@@ -31,10 +31,15 @@ pub const AMX_ERR_NATIVE: c_int = 10;
 /// `ForwardExecType` / `ForwardParam` (amxxmodule.h).
 pub const ET_IGNORE: c_int = 0;
 pub const ET_STOP: c_int = 1;
+pub const ET_STOP2: c_int = 2;
+pub const ET_CONTINUE: c_int = 3;
 pub const FP_DONE: c_int = -1;
 pub const FP_CELL: c_int = 0;
+pub const FP_FLOAT: c_int = 1;
 pub const FP_STRING: c_int = 2;
 pub const FP_ARRAY: c_int = 4;
+pub const FP_CELL_BYREF: c_int = 5;
+pub const FP_FLOAT_BYREF: c_int = 6;
 
 /// `amxx_module_info_s`.
 #[repr(C)]
@@ -143,7 +148,11 @@ pub const PT_ANYTIME: c_int = 3;
 pub const PNL_CMD_FORCED: c_int = 4;
 
 /// `META_RES`.
+pub const MRES_UNSET: c_int = 0;
 pub const MRES_IGNORED: c_int = 1;
+pub const MRES_HANDLED: c_int = 2;
+pub const MRES_OVERRIDE: c_int = 3;
+pub const MRES_SUPERCEDE: c_int = 4;
 
 /// `ginfo_t::GINFO_REALDLL_FULLPATH`: the game library metamod loaded.
 pub const GINFO_REALDLL_FULLPATH: c_int = 5;

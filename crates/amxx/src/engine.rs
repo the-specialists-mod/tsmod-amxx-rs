@@ -1,7 +1,9 @@
 // tsmod-amxx-rs, GPL-3.0-or-later with the AMX Mod X exceptions.
 
 //! The engine functions metamod hands the plugin (`GiveFnptrsToDll`), with safe wrappers for the
-//! few calls and entity fields the TS modules use.
+//! calls and entity fields the modules use: the TS modules' few, and what a bot's world model
+//! needs (traces, contents, the PVS, entity searches, client info keys and the entvars fields a
+//! bot reads), for modules in other repositories too.
 //!
 //! Entities are passed around as [`Edict`] handles; reading a field is a short unsafe access to
 //! the engine's edict array, which lives for the whole map. The accessors never hand out
@@ -9,7 +11,7 @@
 
 use crate::core::{c_string, cstr_lossy};
 use core::ffi::{CStr, c_char};
-use goldsrc_sys::{edict_t, enginefuncs_t, globalvars_t};
+use goldsrc_sys::{TraceResult, edict_t, enginefuncs_t, globalvars_t};
 use std::sync::OnceLock;
 
 /// The engine table and globals.
@@ -224,6 +226,216 @@ impl Engine {
     }
 }
 
+/// `pfnTraceLine` / `pfnTraceHull` flags (the SDK's `ignore_monsters`, `missile`, `ignore_glass`).
+pub mod trace_flags {
+    /// Hit only the world and brush entities (`ignore_monsters`).
+    pub const IGNORE_MONSTERS: i32 = 1;
+    /// Monsters with a larger hull (`missile`).
+    pub const MISSILE: i32 = 2;
+    /// Pass through glass (`ignore_glass`: entities rendered translucent).
+    pub const IGNORE_GLASS: i32 = 0x100;
+}
+
+/// The hulls `pfnTraceHull` takes.
+pub mod hull {
+    pub const POINT: i32 = 0;
+    /// A standing player (32 x 32 x 72).
+    pub const HUMAN: i32 = 1;
+    pub const LARGE: i32 = 2;
+    /// A ducked player (32 x 32 x 36).
+    pub const HEAD: i32 = 3;
+}
+
+/// `pfnPointContents` values (`CONTENTS_*`).
+pub mod contents {
+    pub const EMPTY: i32 = -1;
+    pub const SOLID: i32 = -2;
+    pub const WATER: i32 = -3;
+    pub const SLIME: i32 = -4;
+    pub const LAVA: i32 = -5;
+    pub const SKY: i32 = -6;
+    pub const LADDER: i32 = -16;
+}
+
+/// A trace's result (`TraceResult`), copied out of the engine's struct.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Trace {
+    /// The whole trace was in a solid (`fAllSolid`), it started in one (`fStartSolid`), it ran
+    /// through empty space (`fInOpen`) or water (`fInWater`).
+    pub all_solid: bool,
+    pub start_solid: bool,
+    pub in_open: bool,
+    pub in_water: bool,
+    /// How far it got, 0..1 (`flFraction`), and where (`vecEndPos`).
+    pub fraction: f32,
+    pub end_pos: [f32; 3],
+    /// The plane it hit (`vecPlaneNormal`, `flPlaneDist`).
+    pub plane_normal: [f32; 3],
+    pub plane_dist: f32,
+    /// What it hit (`pHit`: the world's edict for the world, NULL for nothing).
+    pub hit: Edict,
+    /// The hitgroup of a studio model it hit (`iHitgroup`).
+    pub hitgroup: i32,
+}
+
+impl Default for Edict {
+    fn default() -> Self {
+        Edict::NULL
+    }
+}
+
+impl From<&TraceResult> for Trace {
+    fn from(t: &TraceResult) -> Self {
+        Trace {
+            all_solid: t.fAllSolid != 0,
+            start_solid: t.fStartSolid != 0,
+            in_open: t.fInOpen != 0,
+            in_water: t.fInWater != 0,
+            fraction: t.flFraction,
+            end_pos: t.vecEndPos,
+            plane_normal: t.vecPlaneNormal,
+            plane_dist: t.flPlaneDist,
+            hit: Edict(t.pHit),
+            hitgroup: t.iHitgroup,
+        }
+    }
+}
+
+/// The most results one entity search collects (FWGS's `MAX_EDICTS`).
+pub const MAX_SEARCH: usize = 4096;
+
+/// Runs an engine search (`pfnFindEntityByString`, `pfnFindEntityInSphere`) to its end: `next`
+/// makes the call after the previous result and returns its index (`None` for NULL or a free
+/// edict). The engines don't end a search with NULL: FWGS and ReHLDS return the world (index 0),
+/// and a search continued from the world starts over at 1, so stopping on NULL alone repeats every
+/// match until the edict limit. This stops at the world, at NULL, and at an index it already gave.
+pub fn collect_search(mut next: impl FnMut() -> Option<i32>) -> Vec<i32> {
+    let mut out = Vec::new();
+    let mut seen = vec![0u64; MAX_SEARCH / 64 + 1];
+    while out.len() < MAX_SEARCH {
+        let Some(i) = next().filter(|&i| i > 0) else { break };
+        let (word, bit) = (i as usize / 64, 1u64 << (i as usize % 64));
+        if word >= seen.len() {
+            seen.resize(word + 1, 0);
+        }
+        if seen[word] & bit != 0 {
+            break;
+        }
+        seen[word] |= bit;
+        out.push(i);
+    }
+    out
+}
+
+impl Engine {
+    /// `pfnTraceLine(start, end, flags, ignore, &tr)`: `flags` are [`trace_flags`] bits, `ignore`
+    /// an entity the trace passes through (a player's own body). Without the engine function the
+    /// trace reaches `end`.
+    pub fn trace_line(&self, start: [f32; 3], end: [f32; 3], flags: i32, ignore: Edict) -> Trace {
+        let mut tr = TraceResult::default();
+        match self.f.pfnTraceLine {
+            // SAFETY: both vectors and the result are valid for the call; `ignore` is NULL or an
+            // edict of the engine's array.
+            Some(f) => unsafe { f(start.as_ptr(), end.as_ptr(), flags, ignore.0, &mut tr) },
+            None => return Trace { fraction: 1.0, end_pos: end, in_open: true, ..Default::default() },
+        }
+        Trace::from(&tr)
+    }
+
+    /// `pfnTraceHull(start, end, flags, hull, ignore, &tr)`: a box of [`hull`] `hull` swept along
+    /// the line ([`trace_flags`] as for [`trace_line`](Self::trace_line)).
+    pub fn trace_hull(&self, start: [f32; 3], end: [f32; 3], flags: i32, hull: i32, ignore: Edict) -> Trace {
+        let mut tr = TraceResult::default();
+        match self.f.pfnTraceHull {
+            // SAFETY: as in `trace_line`; the engine checks the hull number.
+            Some(f) => unsafe { f(start.as_ptr(), end.as_ptr(), flags, hull, ignore.0, &mut tr) },
+            None => return Trace { fraction: 1.0, end_pos: end, in_open: true, ..Default::default() },
+        }
+        Trace::from(&tr)
+    }
+
+    /// `POINT_CONTENTS(at)`: a [`contents`] value ([`contents::EMPTY`] without the engine).
+    pub fn point_contents(&self, at: [f32; 3]) -> i32 {
+        call!(self.pfnPointContents(at.as_ptr())).unwrap_or(contents::EMPTY)
+    }
+
+    /// `ENGINE_CHECK_VISIBILITY(e, ENGINE_SET_PVS(from))`: whether entity `e` is in the potentially
+    /// visible set of the point `from` (a bot's eyes). True when the engine can't tell, so a
+    /// caller's own trace decides.
+    pub fn in_pvs(&self, e: Edict, from: [f32; 3]) -> bool {
+        let (Some(set), Some(check)) = (self.f.pfnSetFatPVS, self.f.pfnCheckVisibility) else { return true };
+        if e.is_free() {
+            return false;
+        }
+        // SAFETY: the origin is valid for the call; the engine returns its own static PVS buffer,
+        // which `pfnCheckVisibility` reads at once (nothing runs in between); `e` is a live edict.
+        unsafe { check(e.0, set(from.as_ptr())) != 0 }
+    }
+
+    /// One `pfnFindEntityInSphere(after, origin, radius)` step: the next entity whose bounding box
+    /// reaches into the sphere, after `after` (NULL starts the search). The world (or NULL) means
+    /// no more; prefer [`entities_in_sphere`](Self::entities_in_sphere).
+    pub fn find_entity_in_sphere(&self, after: Edict, origin: [f32; 3], radius: f32) -> Edict {
+        Edict(call!(self.pfnFindEntityInSphere(after.0, origin.as_ptr(), radius)).unwrap_or(core::ptr::null_mut()))
+    }
+
+    /// Every entity in the sphere, by index, once each ([`collect_search`]).
+    pub fn entities_in_sphere(&self, origin: [f32; 3], radius: f32) -> Vec<i32> {
+        let mut e = Edict::NULL;
+        collect_search(|| {
+            e = self.find_entity_in_sphere(e, origin, radius);
+            (!e.is_free()).then(|| self.ent_index(e))
+        })
+    }
+
+    /// One `pfnFindEntityByString(after, field, value)` step: the next entity whose string field
+    /// `field` (`classname`, `targetname`, `target`, `netname`, `model`, ...) is `value`.
+    pub fn find_entity_by_string(&self, after: Edict, field: &CStr, value: &CStr) -> Edict {
+        Edict(call!(self.pfnFindEntityByString(after.0, field.as_ptr(), value.as_ptr())).unwrap_or(core::ptr::null_mut()))
+    }
+
+    /// Every entity whose string field `field` is `value`, by index, once each.
+    pub fn find_entities_by_string(&self, field: &str, value: &str) -> Vec<i32> {
+        let (f, v) = (c_string(field), c_string(value));
+        let mut e = Edict::NULL;
+        collect_search(|| {
+            e = self.find_entity_by_string(e, &f, &v);
+            (!e.is_free()).then(|| self.ent_index(e))
+        })
+    }
+
+    /// `CREATE_FAKE_CLIENT(netname)`: a client slot for a bot, NULL when the server is full. The
+    /// TS server makes its bots itself (the plugin API's `create_bot`); this is for engines and
+    /// games without one.
+    pub fn create_fake_client(&self, netname: &CStr) -> Edict {
+        Edict(call!(self.pfnCreateFakeClient(netname.as_ptr())).unwrap_or(core::ptr::null_mut()))
+    }
+
+    /// `INFOKEY_VALUE(GET_INFOKEYBUFFER(e), key)`: a client's user info key ("" when unset; `e`
+    /// NULL reads the server's localinfo, as [`localinfo`](Self::localinfo)).
+    pub fn client_info_key(&self, e: Edict, key: &CStr) -> String {
+        let Some(buf) = call!(self.pfnGetInfoKeyBuffer(e.0)) else { return String::new() };
+        if buf.is_null() {
+            return String::new();
+        }
+        // SAFETY: an info buffer the engine just returned.
+        unsafe { self.info_key_value(buf, key) }
+    }
+
+    /// `pfnGetPlayerUserId(e)`: the client's user id, -1 for a free slot or a non-client.
+    pub fn user_id(&self, e: Edict) -> i32 {
+        if e.is_free() {
+            return -1;
+        }
+        call!(self.pfnGetPlayerUserId(e.0)).unwrap_or(-1)
+    }
+
+    /// `gpGlobals->frametime`.
+    pub fn frametime(&self) -> f32 {
+        self.globals().frametime
+    }
+}
+
 /// An edict handle. Holding one is always fine; the accessors check for NULL and read or write
 /// one field at a time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -327,6 +539,80 @@ impl Edict {
         netname_id: goldsrc_sys::string_t = netname);
     field!(/// `pev->weaponmodel`.
         weapon_model_id: goldsrc_sys::string_t = weaponmodel);
+    field!(/// `pev->angles`.
+        angles: [f32; 3] = angles);
+    field!(/// `pev->v_angle` (a player's view).
+        v_angle: [f32; 3] = v_angle);
+    field!(/// `pev->punchangle`.
+        punchangle: [f32; 3] = punchangle);
+    field!(/// `pev->view_ofs` (eyes above the origin).
+        view_ofs: [f32; 3] = view_ofs);
+    field!(/// `pev->mins`.
+        mins: [f32; 3] = mins);
+    field!(/// `pev->maxs`.
+        maxs: [f32; 3] = maxs);
+    field!(/// `pev->size`.
+        size: [f32; 3] = size);
+    field!(/// `pev->absmin`.
+        absmin: [f32; 3] = absmin);
+    field!(/// `pev->absmax`.
+        absmax: [f32; 3] = absmax);
+    field!(/// `pev->movedir`.
+        movedir: [f32; 3] = movedir);
+    field!(/// `pev->movetype` (`MOVETYPE_*`).
+        movetype: i32 = movetype);
+    field!(/// `pev->solid` (`SOLID_*`).
+        solid: i32 = solid);
+    field!(/// `pev->takedamage` (`DAMAGE_*`).
+        takedamage: f32 = takedamage);
+    field!(/// `pev->effects` (`EF_*`; `EF_NODRAW` hides it).
+        effects: i32 = effects);
+    field!(/// `pev->spawnflags`.
+        spawnflags: i32 = spawnflags);
+    field!(/// `pev->button` (`IN_*` of the last command).
+        button: i32 = button);
+    field!(/// `pev->impulse`.
+        impulse: i32 = impulse);
+    field!(/// `pev->waterlevel` (0 dry .. 3 under).
+        waterlevel: i32 = waterlevel);
+    field!(/// `pev->watertype` (a `CONTENTS_*` value).
+        watertype: i32 = watertype);
+    field!(/// `pev->armorvalue`.
+        armorvalue: f32 = armorvalue);
+    field!(/// `pev->max_health`.
+        max_health: f32 = max_health);
+    field!(/// `pev->rendermode` (`kRender*`).
+        rendermode: i32 = rendermode);
+    field!(/// `pev->renderamt`.
+        renderamt: f32 = renderamt);
+    field!(/// `pev->gravity`.
+        gravity: f32 = gravity);
+    field!(/// `pev->maxspeed`.
+        maxspeed: f32 = maxspeed);
+    field!(/// `pev->speed`.
+        speed: f32 = speed);
+    field!(/// `pev->nextthink`.
+        nextthink: f32 = nextthink);
+    field!(/// `pev->ltime` (a brush mover's local time).
+        ltime: f32 = ltime);
+    field!(/// `pev->frame`.
+        frame: f32 = frame);
+    field!(/// `pev->sequence`.
+        sequence: i32 = sequence);
+    field!(/// `pev->iuser1` (the observer mode on players).
+        iuser1: i32 = iuser1);
+    field!(/// `pev->iuser2` (the observer's target).
+        iuser2: i32 = iuser2);
+    field!(/// `pev->fuser1` (TS: the time scale).
+        fuser1: f32 = fuser1);
+    field!(/// `pev->model`.
+        model_id: goldsrc_sys::string_t = model);
+    field!(/// `pev->targetname`.
+        targetname_id: goldsrc_sys::string_t = targetname);
+    field!(/// `pev->target`.
+        target_id: goldsrc_sys::string_t = target);
+    field!(/// `pev->globalname`.
+        globalname_id: goldsrc_sys::string_t = globalname);
 
     /// `pev->dmg_inflictor`.
     pub fn dmg_inflictor(self) -> Edict {
@@ -354,6 +640,63 @@ impl Edict {
         Edict(unsafe { (*self.0).v.owner })
     }
 
+    /// An edict-valued entvars field, NULL for none.
+    fn edict_field(self, f: impl FnOnce(&goldsrc_sys::entvars_t) -> *mut edict_t) -> Edict {
+        if self.is_null() {
+            return Edict::NULL;
+        }
+        // SAFETY: as in `field!`; the reference lives only for the read.
+        Edict(f(unsafe { &(*self.0).v }))
+    }
+
+    /// `pev->groundentity` (what it stands on).
+    pub fn groundentity(self) -> Edict {
+        self.edict_field(|v| v.groundentity)
+    }
+
+    /// `pev->enemy`.
+    pub fn enemy(self) -> Edict {
+        self.edict_field(|v| v.enemy)
+    }
+
+    /// `pev->aiment` (what it is attached to).
+    pub fn aiment(self) -> Edict {
+        self.edict_field(|v| v.aiment)
+    }
+
+    /// `pev->pContainingEntity` (the edict itself, for a live one).
+    pub fn containing_entity(self) -> Edict {
+        self.edict_field(|v| v.pContainingEntity)
+    }
+
+    /// The middle of the bounding box, `(absmin + absmax) / 2` (`Center()` for brush entities,
+    /// whose origin is often 0).
+    pub fn center(self) -> [f32; 3] {
+        let (a, b) = (self.absmin(), self.absmax());
+        [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5]
+    }
+
+    /// The eyes: `origin + view_ofs`.
+    pub fn eye_position(self) -> [f32; 3] {
+        let (o, v) = (self.origin(), self.view_ofs());
+        [o[0] + v[0], o[1] + v[1], o[2] + v[2]]
+    }
+
+    /// `STRING(pev->model)`.
+    pub fn model(self) -> String {
+        engine().map(|e| e.string(self.model_id())).unwrap_or_default()
+    }
+
+    /// `STRING(pev->targetname)`.
+    pub fn targetname(self) -> String {
+        engine().map(|e| e.string(self.targetname_id())).unwrap_or_default()
+    }
+
+    /// `STRING(pev->target)`.
+    pub fn target(self) -> String {
+        engine().map(|e| e.string(self.target_id())).unwrap_or_default()
+    }
+
     /// `STRING(pev->classname)`.
     pub fn classname(self) -> String {
         engine().map(|e| e.string(self.classname_id())).unwrap_or_default()
@@ -372,5 +715,61 @@ impl Edict {
     /// The edict at `index` in the array starting at `self` (`pEdictList + i` in `ServerActivate`).
     pub fn offset(self, index: i32) -> Edict {
         Edict(self.0.wrapping_offset(index as isize))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn searches_stop_at_the_world_and_at_a_repeat() {
+        // An engine that ends with the world and then starts over.
+        let seq = [3, 7, 9, 0, 3, 7];
+        let mut i = 0;
+        let got = collect_search(|| {
+            let r = seq.get(i).copied();
+            i += 1;
+            r
+        });
+        assert_eq!(got, [3, 7, 9]);
+        // One that never returns the world but loops.
+        let seq = [5, 6, 5, 6];
+        let mut i = 0;
+        assert_eq!(
+            collect_search(|| {
+                i += 1;
+                seq.get(i - 1).copied()
+            }),
+            [5, 6]
+        );
+        // NULL at once.
+        assert!(collect_search(|| None).is_empty());
+    }
+
+    #[test]
+    fn traces_copy_every_field() {
+        let tr = TraceResult {
+            fAllSolid: 0,
+            fStartSolid: 1,
+            fInOpen: 1,
+            fInWater: 0,
+            flFraction: 0.25,
+            vecEndPos: [1.0, 2.0, 3.0],
+            flPlaneDist: 4.0,
+            vecPlaneNormal: [0.0, 0.0, 1.0],
+            pHit: core::ptr::null_mut(),
+            iHitgroup: 2,
+        };
+        let t = Trace::from(&tr);
+        assert!(t.start_solid && t.in_open && !t.all_solid && !t.in_water);
+        assert_eq!((t.fraction, t.end_pos, t.plane_normal, t.plane_dist, t.hitgroup), (0.25, [1.0, 2.0, 3.0], [0.0, 0.0, 1.0], 4.0, 2));
+        assert!(t.hit.is_null());
+    }
+
+    #[test]
+    fn edict_fields_of_null_are_zero() {
+        let e = Edict::NULL;
+        assert_eq!((e.v_angle(), e.solid(), e.groundentity(), e.center()), ([0.0; 3], 0, Edict::NULL, [0.0; 3]));
     }
 }

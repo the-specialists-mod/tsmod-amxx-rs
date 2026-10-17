@@ -57,19 +57,22 @@ Hooks (as upstream): pre `ClientDisconnect`, `ServerDeactivate`; post `ClientCon
 The Rust server exports tier1's `CreateInterface`. tsx asks metamod for the game library's path
 (`GET_GAME_INFO(PLID, GINFO_REALDLL_FULLPATH)`), finds the export in the already loaded library
 (`dlopen(RTLD_NOLOAD)` + `dlsym` on Linux; `GetModuleHandleA` + `GetProcAddress` on Windows,
-retrying with the bare file name) and calls it with `TSRS_PluginApi006` (version 6; version 5
+retrying with the bare file name) and calls it with `TSRS_PluginApi007` (version 7; version 5
 was tsmod-amxx-rs#8, #10 and #15, the-specialistsmod-rs#197). The name carries the version and versions aren't compatible, so a
-server with another version answers NULL; a table whose `version` isn't 6 or whose `size` is
+server with another version answers NULL; a table whose `version` isn't 7 or whose `size` is
 smaller than this build's `PluginApi` is refused too (`amxx::tsapi::find`). The lookup runs at `AMXX_PluginsLoaded`
 and again at each `ServerActivate` until it succeeds; a server without the API gets one warning
 in the AMX Mod X log.
 
-tsx and hamsandwich both need version 6, though they use nothing it added (version 6 changed only
-what bot backends use: `run_cmd`, the per-frame queries, the damage and sound callbacks' arguments
-and the touch, shot and pickup callbacks; the modules' listener sets none of those). They use none of version 3's additions (bots,
-entity info, host services) or version 4's (team scores, objectives, entity creation), only the
-player functions, the entity hooks (whose version 4 additions hamsandwich passes through, section
-8: the gun's functions, the queries, `Ham_TS_GiveSlowMul`'s float) and version 5's:
+tsx and hamsandwich both need version 7. hamsandwich uses the player functions, the entity hooks
+(whose version 4 additions it passes through, section 8: the gun's functions, the queries,
+`Ham_TS_GiveSlowMul`'s float) and version 5's private-data mirror. tsx uses the player functions,
+version 5's listener callbacks below, and for its bot natives (`include/tsbot.inc`, section 9)
+version 3's bot functions, version 4's objectives and team scores, version 6's per-frame world
+(`players`, `items`, `frame_info`, `entity_key`, `run_cmd`'s result) and callbacks (start frame,
+damage, sound, touch, shot, pickup, ...), and version 7's plugin identities (`attach_plugin`: a
+Pawn plugin's bot backend). Before version 7 (`add_listener(listener)`) the modules' listener had
+no owner; it is `NO_PLUGIN` now:
 
 * **The listener** (`ffi/listener.rs`): tsx registers a `Plugin` descriptor with
   `add_listener` once it finds the API (removed at `AMXX_Detach`), with four callbacks:
@@ -398,7 +401,7 @@ as for any other. One deviation from stock: the port's `Ham_TS_GiveSlowMul` retu
 `ExecuteHam` writes the result to an out parameter if the plugin passes one (a stock-compiled call
 without one still runs).
 
-**Without API version 6** the module loads, logs one warning and registers its natives;
+**Without API version 7** the module loads, logs one warning and registers its natives;
 `IsHamValid` is 0 and `RegisterHam`/`ExecuteHam` fail through `__fatal_ham_error` as stock does
 for functions missing from its gamedata.
 
