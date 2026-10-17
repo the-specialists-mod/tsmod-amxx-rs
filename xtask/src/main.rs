@@ -6,7 +6,7 @@
 //!                            unless --debug-info), with AMX Mod X's file names
 //! lint                       cargo fmt --check, clippy -D warnings on both targets
 //! test                       unit tests on the host and on i686 Linux (the ABI layout tests)
-//! e2e [linux] [win]          modules + e2e/*.sma (tsx, hamsandwich) on the amxx-testenv roots, a bot match on
+//! e2e [linux] [win]          modules + e2e/*.sma (tsx, hamsandwich, tsbot) on the amxx-testenv roots, a bot match on
 //!                            ts_dojo, then the plugin's checks (default: linux)
 //! ```
 //!
@@ -15,7 +15,7 @@
 //! `AMXX_TESTENV` (default `~/dev/hl/ref/amxx-testenv`), `AMXX_SCRIPTING` (amxxpc's directory),
 //! `AMXX_LINUX_ROOT` / `AMXX_WIN_ROOT` (default `~/games/amxx_rehlds_{linux,win}`),
 //! `AMXX_TSSTATS_SMA` (upstream's score plugin source), `E2E_TIMEOUT` (seconds to wait for the plugin, default
-//! 150), `E2E_NO_STATS` (skip the stats round trip).
+//! 150), `E2E_NO_STATS` (skip the stats round trip), `E2E_NO_TSBOT` (skip tsbot.inc's phase), `E2E_ONLY_TSBOT` (only it).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -139,10 +139,11 @@ fn dist(debug_info: bool) -> Result<(), String> {
             eprintln!("  {}", dest.display());
         }
         // The patched includes, for recompiling plugins: tsxaddon.inc (ts_setuserammo as a
-        // native), tsconst.inc (TS 3.0's weapon ids) and tsfun.inc (the forwards tsx fires).
+        // native), tsconst.inc (TS 3.0's weapon ids), tsfun.inc (the forwards tsx fires) and the
+        // port addition tsbot.inc (tsx's bot natives and forwards).
         let inc = root().join("dist").join(t.platform).join("addons/amxmodx/scripting/include");
         std::fs::create_dir_all(&inc).map_err(|e| e.to_string())?;
-        for f in ["tsxaddon.inc", "tsconst.inc", "tsfun.inc"] {
+        for f in ["tsxaddon.inc", "tsconst.inc", "tsfun.inc", "tsbot.inc"] {
             std::fs::copy(root().join("include").join(f), inc.join(f)).map_err(|e| e.to_string())?;
         }
     }
@@ -218,6 +219,10 @@ fn ensure_line(file: &Path, line: &str) -> Result<(), String> {
 
 /// The end-to-end plugins: `e2e/<name>.sma`, each logging to `logs/<name>.log`.
 const PLUGINS: [&str; 2] = ["tsx_e2e", "ham_e2e"];
+
+/// tsbot.inc's test plugin: a bot backend of its own, on a server of its own without quota bots
+/// (it takes the bots over, which the match above needs), after the match ([`tsbot_phase`]).
+const BOT_PLUGIN: &str = "tsbot_e2e";
 
 /// The modules `amxx modules` must list as running.
 const MODULE_NAMES: [&str; 3] = ["TSX", "TSFun Wrapper", "Ham Sandwich"];
@@ -517,6 +522,81 @@ fn stats_round_trip(r: &Root, testenv: &Path, log: &Path, console_from: usize) -
     fails
 }
 
+/// Comments plugins.ini's line for `name` out (`;name.amxx debug`) or back in.
+fn set_plugin_enabled(ini: &Path, name: &str, on: bool) -> Result<(), String> {
+    let line = format!("{name}.amxx debug");
+    let text = std::fs::read_to_string(ini).map_err(|e| e.to_string())?;
+    let mut found = false;
+    let out: Vec<String> = text
+        .lines()
+        .map(|l| {
+            if l.trim_start_matches(';') == line {
+                found = true;
+                if on { line.clone() } else { format!(";{line}") }
+            } else {
+                l.to_owned()
+            }
+        })
+        .collect();
+    let mut out = out.join("\n") + "\n";
+    if !found && on {
+        out.push_str(&format!("; tsmod-amxx-rs e2e\n{line}\n"));
+    }
+    std::fs::write(ini, out).map_err(|e| e.to_string())
+}
+
+/// tsbot.inc's end-to-end test: `e2e/tsbot_e2e.sma` alone (the match's plugins commented out of
+/// plugins.ini meanwhile) on a server without quota bots. It sets `ts_bot_backend tsbot_e2e`,
+/// registers the backend, adds a bot through `addbot` and one directly, drives them, and logs
+/// `CHECK` lines and `DONE` to `logs/tsbot_e2e.log`. Returns the failures.
+fn tsbot_phase(r: &Root, testenv: &Path) -> Vec<String> {
+    let os = r.os;
+    let amxx = r.dir.join("ts/addons/amxmodx");
+    let ini = amxx.join("configs/plugins.ini");
+    let log = amxx.join(format!("logs/{BOT_PLUGIN}.log"));
+    let mut fails = Vec::new();
+    if running(r) {
+        let _ = Command::new(testenv.join("stop.sh")).arg(os).status();
+    }
+    let dest = amxx.join(format!("plugins/{BOT_PLUGIN}.amxx"));
+    let _ = std::fs::remove_file(&dest);
+    let _ = std::fs::remove_file(&log);
+    let setup = std::fs::copy(plugin_path(BOT_PLUGIN), &dest)
+        .map_err(|e| e.to_string())
+        .and_then(|_| PLUGINS.iter().try_for_each(|n| set_plugin_enabled(&ini, n, false)))
+        .and_then(|()| set_plugin_enabled(&ini, BOT_PLUGIN, true));
+    let restore = || {
+        for n in PLUGINS {
+            let _ = set_plugin_enabled(&ini, n, true);
+        }
+        let _ = set_plugin_enabled(&ini, BOT_PLUGIN, false);
+    };
+    if let Err(e) = setup {
+        restore();
+        return vec![format!("{os}: tsbot: {e}")];
+    }
+    if let Err(e) = run(Command::new(testenv.join("run.sh")).args([os, "--map", "ts_dojo", "--bots", "0"])) {
+        restore();
+        return vec![format!("{os}: tsbot: {e}")];
+    }
+    let done = wait_for(&log, Duration::from_secs(150), |t| t.contains("DONE"));
+    quit(r, testenv);
+    restore();
+    let text = std::fs::read_to_string(&log).unwrap_or_default();
+    println!("--- {os} {BOT_PLUGIN} ({}) ---", log.display());
+    for l in text.lines() {
+        let msg = l.split_once(": ").map_or(l, |(_, m)| m);
+        println!("  {msg}");
+        if msg.starts_with("CHECK ") && msg.contains(" FAIL") {
+            fails.push(format!("{os}: {msg}"));
+        }
+    }
+    if !done {
+        fails.push(format!("{os}: no DONE in {} (did tsx and the plugin load?)", log.display()));
+    }
+    fails
+}
+
 fn rcon(testenv: &Path, port: u16, cmd: &str) -> String {
     Command::new("python3")
         .arg("-I")
@@ -533,6 +613,9 @@ fn e2e_root(r: &Root, testenv: &Path) -> Result<Vec<String>, String> {
         return Err(format!("a server is already running in {} (amxx-testenv/stop.sh {})", r.dir.display(), r.os));
     }
     install(r)?;
+    if std::env::var_os("E2E_ONLY_TSBOT").is_some() {
+        return Ok(tsbot_phase(r, testenv));
+    }
     let logs = r.dir.join("ts/addons/amxmodx/logs");
     let started = std::time::SystemTime::now();
     let console_from = file_len(&qconsole(r));
@@ -559,6 +642,11 @@ fn e2e_root(r: &Root, testenv: &Path) -> Result<Vec<String>, String> {
         let _ = Command::new(testenv.join("stop.sh")).arg(r.os).status();
         Vec::new()
     };
+
+    // tsbot.inc's phase, on its own server, before the error logs are read.
+    if std::env::var_os("E2E_NO_TSBOT").is_none() {
+        fails.extend(tsbot_phase(r, testenv));
+    }
 
     for name in PLUGINS {
         let log = log_of(name);
@@ -626,7 +714,7 @@ fn e2e(names: &[String]) -> Result<(), String> {
     }
     let roots = roots(names)?;
     build(true)?;
-    for name in PLUGINS.into_iter().chain([SCORE_STOCK, SCORE_E2E]) {
+    for name in PLUGINS.into_iter().chain([SCORE_STOCK, SCORE_E2E, BOT_PLUGIN]) {
         compile_plugin(&scripting, name, &plugin_path(name))?;
     }
     let mut fails = Vec::new();
