@@ -148,6 +148,22 @@ public Melee_Attack(id, Float:time, Float:damage)
 	return PLUGIN_CONTINUE;
 }
 
+// Where a power-up dropped for `id` lands clear of its hull: 40 units off at the knees in the
+// first direction with room to 64, else `o` (the player's origin) unchanged.
+pwup_spot(id, Float:o[3])
+{
+	new Float:low[3], Float:to[3], Float:hit[3];
+	low[0] = o[0]; low[1] = o[1]; low[2] = o[2] - 18.0;
+	for (new k = 0; k < 8; k++) {
+		new Float:dx = floatcos(float(k) * 45.0, degrees), Float:dy = floatsin(float(k) * 45.0, degrees);
+		to[0] = low[0] + dx * 64.0; to[1] = low[1] + dy * 64.0; to[2] = low[2];
+		trace_line(id, low, to, hit);
+		if (get_distance_f(low, hit) < 60.0) continue;
+		o[0] += dx * 40.0; o[1] += dy * 40.0; o[2] = low[2];
+		return;
+	}
+}
+
 Float:get_z(id)
 {
 	new Float:o[3];
@@ -294,10 +310,12 @@ public t_pwup()
 	new ent = ts_createpwup(TSPWUP_HEALTH);
 	if (!ent) { check("client_powerup", 0, "ts_createpwup failed"); return; }
 	// "create_pwup -> !wait! -> give_pwup" (upstream): a ts_powerup takes touches only once it has
-	// landed, so drop it at the player's feet and give it a second later (if the player hasn't
-	// walked into it first, which fires the same forward).
+	// landed, so drop it beside the player (inside a standing player's hull it never lands) and
+	// give it a second later (if the player hasn't walked into it first, which fires the same
+	// forward).
 	new Float:o[3];
 	entity_get_vector(g_pwup_target, EV_VEC_origin, o);
+	pwup_spot(g_pwup_target, o);
 	entity_set_origin(ent, o);
 	new p[1]; p[0] = ent;
 	set_task(1.0, "t_pwup_give", 0, p, 1);
