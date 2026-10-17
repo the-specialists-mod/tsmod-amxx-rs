@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "amxx"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "goldsrc-sys",
  "libc",
@@ -79,23 +79,23 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "goldsrc"
-version = "3.0.6"
-source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=ed64e5070370d91e02e48574332a1673e2adaee8#ed64e5070370d91e02e48574332a1673e2adaee8"
+version = "3.0.7"
+source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?tag=v3.0.7#ba33099d1c294c02de78493a6c4c83cb93177e4f"
 dependencies = [
  "goldsrc-sys",
 ]
 
 [[package]]
 name = "goldsrc-sys"
-version = "3.0.6"
-source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=ed64e5070370d91e02e48574332a1673e2adaee8#ed64e5070370d91e02e48574332a1673e2adaee8"
+version = "3.0.7"
+source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?tag=v3.0.7#ba33099d1c294c02de78493a6c4c83cb93177e4f"
 dependencies = [
  "bindgen",
 ]
 
 [[package]]
 name = "hamsandwich"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "amxx",
  "goldsrc-sys",
@@ -250,8 +250,8 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "3.0.6"
-source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=ed64e5070370d91e02e48574332a1673e2adaee8#ed64e5070370d91e02e48574332a1673e2adaee8"
+version = "3.0.7"
+source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?tag=v3.0.7#ba33099d1c294c02de78493a6c4c83cb93177e4f"
 dependencies = [
  "goldsrc",
  "goldsrc-sys",
@@ -310,24 +310,24 @@ dependencies = [
 
 [[package]]
 name = "ts-gameplay"
-version = "3.0.6"
-source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=ed64e5070370d91e02e48574332a1673e2adaee8#ed64e5070370d91e02e48574332a1673e2adaee8"
+version = "3.0.7"
+source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?tag=v3.0.7#ba33099d1c294c02de78493a6c4c83cb93177e4f"
 
 [[package]]
 name = "ts-plugin-api"
-version = "3.0.6"
-source = "git+file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists?rev=ed64e5070370d91e02e48574332a1673e2adaee8#ed64e5070370d91e02e48574332a1673e2adaee8"
+version = "3.0.7"
+source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?tag=v3.0.7#ba33099d1c294c02de78493a6c4c83cb93177e4f"
 
 [[package]]
 name = "tsfun"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "amxx",
 ]
 
 [[package]]
 name = "tsx"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "amxx",
  "goldsrc-sys",
@@ -361,4 +361,4 @@ checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"

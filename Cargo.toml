@@ -4,19 +4,18 @@ resolver = "3"
 
 [workspace.package]
 edition = "2024"
-version = "0.1.0"
+version = "0.2.0"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/the-specialists-mod/tsmod-amxx-rs"
 
-# The port's crates, pinned to its local `plugin-api-v6` branch (not pushed yet; repin to the
-# release tag that ships it): version 6 of the plugin API (`ts-plugin-api`: the bot backends'
-# frame queries, run_cmd's result and the touch, damage, shot and pickup callbacks) and its server
-# implementation.
+# The port's crates, pinned to its v3.0.7 release: version 6 of the plugin API (`ts-plugin-api`:
+# the bot backends' frame queries, run_cmd's result and the touch, damage, shot and pickup
+# callbacks) and its server implementation.
 [workspace.dependencies]
-goldsrc-sys = { git = "file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists", rev = "ed64e5070370d91e02e48574332a1673e2adaee8" }
-ts-plugin-api = { git = "file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists", rev = "ed64e5070370d91e02e48574332a1673e2adaee8" }
+goldsrc-sys = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", tag = "v3.0.7" }
+ts-plugin-api = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", tag = "v3.0.7" }
 # Tests only: the port's message encoders, so the parsers are checked against the real wire code.
-shared = { git = "file:///home/mmckenzie/dev/hl/rust-hlmod-the-specialists", rev = "ed64e5070370d91e02e48574332a1673e2adaee8" }
+shared = { git = "https://github.com/the-specialists-mod/the-specialistsmod-rs", tag = "v3.0.7" }
 
 [profile.dev]
 panic = "abort" # unwinding across the C ABI is UB; be explicit

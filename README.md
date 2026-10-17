@@ -23,7 +23,7 @@ the weapon in hand.
 ## Requirements
 
 * The Rust TS server ([the-specialistsmod-rs](https://github.com/the-specialists-mod/the-specialistsmod-rs))
-  with plugin API version 6 (the release after v3.0.6), on Linux or Windows. Older builds work too, but the natives that change
+  with plugin API version 6 (v3.0.7 or later), on Linux or Windows. Older builds work too, but the natives that change
   players do nothing (see below). Both modules need version 6 of the API (`TSRS_PluginApi006`; version 5 brought what
   they use: kill reports, the tsfun forwards and the private-data mirror, tsmod-amxx-rs#8, #10, #15,
   the-specialistsmod-rs#197; version 6 changed only what bot backends use); a
