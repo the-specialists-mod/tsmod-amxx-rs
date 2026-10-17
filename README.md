@@ -16,7 +16,7 @@ the weapon in hand.
 
 | Module | Library | File (Linux / Windows) | What |
 |---|---|---|---|
-| TSX | `tsx`, class `xstats` | `tsx_amxx_i386.so` / `tsx_amxx.dll` | All the TS natives, the stats natives, `client_damage` / `client_death`, tsfun.inc's `client_stunt` / `client_powerup` / `Melee_Attack`, the rank. A metamod plugin too. |
+| TSX | `tsx`, class `xstats` | `tsx_amxx_i386.so` / `tsx_amxx.dll` | All the TS natives, the stats natives, `client_damage` / `client_death`, tsfun.inc's `client_stunt` / `client_powerup` / `Melee_Attack`, the rank, and (port addition) `tsbot.inc`'s natives and forwards for a Pawn bot backend. A metamod plugin too. |
 | TSFun Wrapper | `tsfun` | `tsfun_amxx_i386.so` / `tsfun_amxx.dll` | Empty, as upstream: lets plugins with `#include <tsfun>` (`#pragma reqlib tsfun`) load. |
 | Ham Sandwich | `hamsandwich` | `hamsandwich_amxx_i386.so` / `hamsandwich_amxx.dll` | `RegisterHam`, `ExecuteHam` and the rest, over the server's entity hooks (plugin API version 5, including the gun's `Item_*` / `Weapon_*` functions on `weapon_tsgun`), and `get_pdata_cbase` over the server's private-data mirror. Replaces AMX Mod X's file of the same name. A metamod plugin too. |
 
@@ -46,8 +46,8 @@ the weapon in hand.
    [releases](https://github.com/the-specialists-mod/tsmod-amxx-rs/releases) and copy its
    `addons/` directory over your server's `ts/addons/`. That puts the three modules in
    `addons/amxmodx/modules/`, replacing AMX Mod X's own tsx, tsfun and hamsandwich (same file
-   names), and the patched `tsxaddon.inc` and `tsconst.inc` in
-   `addons/amxmodx/scripting/include/`.
+   names), and the patched `tsxaddon.inc`, `tsconst.inc` and `tsfun.inc` and the new `tsbot.inc`
+   in `addons/amxmodx/scripting/include/`.
 2. Plugins that include `tsx.inc`/`tsfun.inc` load the modules automatically. Otherwise add
    `tsx` and `tsfun` lines to `addons/amxmodx/configs/modules.ini`.
 3. Optional, for the stats plugins (`statsx`, `tsstats`): `addons/amxmodx/data/tsstats.amxx`
@@ -125,6 +125,23 @@ Port additions: tsfun.inc's `client_stunt(id, stunttype)` (`STUNT_ROLL` 2, `STUN
 (a held power-up used, or one that works at once picked up) and `Melee_Attack(id, Float:time,
 Float:damage)` (before a kung-fu move; `ts_set_fuattack` changes it, `PLUGIN_HANDLED` blocks it)
 fire from the server's plugin API (version 5). Upstream declared them "UNAVAILABLE IN 1.70".
+
+### Bot natives: `tsbot.inc`
+
+Port addition, with no upstream counterpart: [`include/tsbot.inc`](include/tsbot.inc) (library
+`tsx`) lets a Pawn plugin be the server's bot backend (`ts_bot_backend <name>`) and read the
+world a bot needs, through the plugin API version 7. Full reference: [docs/tsbot.md](docs/tsbot.md).
+
+| Group | Natives / forwards |
+|---|---|
+| Backend | `ts_bot_register_backend`, `ts_bot_unregister_backend`, `ts_bot_data_dir`, `ts_bot_log`; forwards `ts_bot_add`, `ts_bot_activate`, `ts_bot_deactivate`, `ts_bot_adopt` (to the registering plugin only) |
+| Bots | `ts_bot_create`, `ts_bot_kick`, `ts_bot_runcmd`, `ts_bot_get_result`, `ts_bot_command`, `ts_bot_select_weapon`, `ts_bot_buy`, `ts_bot_buy_item`, `ts_bot_clear_loadout`, `ts_drop_weapon` |
+| Players | `ts_get_player_snapshot` (`TSPS_*`), `ts_get_player_field`, `_flags`, `_team`, `_health`, `_stance`, `_weapon`, `_powerup`, `_timescale`, `_combat`, `ts_get_inventory`, `ts_get_inventory_ex` |
+| World | `ts_get_items`, `ts_get_objectives`, `ts_get_objective_name`, `ts_get_gamestate`, `ts_get_frameinfo`, `ts_entity_key`, `ts_get_entity_info`, `ts_master_triggered`, `ts_projectile_owner` |
+| Events | `ts_frame` (run bots here), `ts_weapon_fired`, `ts_item_pickup`, `ts_bot_touch`, `ts_sound`, `ts_damage`, `ts_player_killed`, `ts_player_spawned`, `ts_round_start`, `ts_round_end`, `ts_weapon_changed`, `ts_ammo_changed` |
+
+They use the server's weapon ids (kung fu 0), return `TSBOT_*` statuses instead of raising native
+errors, and need the server's plugin API version 7.
 
 ### Weapon ids
 
@@ -215,6 +232,7 @@ Pushing a `v*` tag builds both platforms and publishes `tsmod-amxx-rs-<tag>-<pla
 |---|---|
 | [AGENTS.md](AGENTS.md) | Working in this repository: layout, the `unsafe` boundary, commands, conventions, pitfalls |
 | [docs/design.md](docs/design.md) | How the modules work: loading, the plugin API lookup, message parsing, stats and the rank file, hamsandwich's dispatch, deviations from upstream |
+| [docs/tsbot.md](docs/tsbot.md) | `tsbot.inc`: a Pawn plugin as the TS bot backend, its natives, forwards, constants and lifecycle |
 
 ## License and credits
 

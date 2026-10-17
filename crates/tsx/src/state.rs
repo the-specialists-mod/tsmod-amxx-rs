@@ -41,6 +41,8 @@ pub struct State {
     /// The server reports each death it scores (plugin API version 5, `kill_scored`; port
     /// addition): the death half of `TSHealth` waits for the report instead of predicting.
     pub kill_reports: bool,
+    /// Pawn bot backends and the bots' last commands (port addition, `crate::bots`).
+    pub bots: crate::bots::Bots,
 }
 
 impl Default for State {
@@ -57,6 +59,7 @@ impl Default for State {
             api_warned: Vec::new(),
             melee: None,
             kill_reports: false,
+            bots: crate::bots::Bots::default(),
         }
     }
 }
@@ -204,10 +207,12 @@ impl State {
 
     /// `ClientDisconnect`.
     pub fn client_disconnect(&mut self, g: &dyn Game, ent: i32) {
-        if let Some(i) = slot(self, ent)
-            && self.players[i].ingame
-        {
-            self.disconnect_player(g, i);
+        if let Some(i) = slot(self, ent) {
+            // Port addition: the slot's next bot has no last command yet.
+            self.bots.results[i] = None;
+            if self.players[i].ingame {
+                self.disconnect_player(g, i);
+            }
         }
     }
 

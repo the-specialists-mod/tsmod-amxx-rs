@@ -15,6 +15,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod bots;
 pub mod forwards;
 pub mod game;
 pub mod msgs;

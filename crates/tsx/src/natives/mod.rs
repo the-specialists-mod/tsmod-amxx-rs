@@ -4,7 +4,9 @@
 //! `crate::ffi` binds them to their upstream names.
 
 pub mod base;
+pub mod bot;
 pub mod stats;
+pub mod world;
 
 use crate::game::{Game, PlayerInfo, TsApi};
 use crate::state::with;
@@ -44,7 +46,7 @@ fn info(g: &dyn Game, id: usize) -> Option<PlayerInfo> {
 
 /// Logs `msg` the first time `key` comes up (per server run), so a plugin calling a native every
 /// frame doesn't flood the log.
-fn log_once(g: &dyn Game, key: &str, msg: impl FnOnce() -> String) {
+pub(crate) fn log_once(g: &dyn Game, key: &str, msg: impl FnOnce() -> String) {
     let first = with(|s| {
         let first = !s.api_warned.iter().any(|k| k == key);
         if first {

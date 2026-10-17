@@ -10,7 +10,7 @@ mod game;
 mod hooks;
 mod listener;
 
-use crate::natives::{base, stats};
+use crate::natives::{base, bot, stats, world};
 use crate::state::with;
 use amxx::Cell;
 use amxx::engine::engine;
@@ -37,7 +37,7 @@ static MODULE: ModuleDef = ModuleDef {
     attach: amxx_attach,
     detach: amxx_detach,
     plugins_loaded,
-    plugins_unloading: nothing,
+    plugins_unloading,
     plugins_unloaded: nothing,
 };
 
@@ -84,6 +84,8 @@ fn localinfo(name: &str, def: &str) -> String {
 /// `OnAmxxAttach`: natives, the score plugin, and the rank file.
 fn amxx_attach() {
     amxx::core::add_natives(&NATIVES);
+    // Port addition: Pawn bot backends' server callbacks (`crate::bots`).
+    amxx::tsapi::backend::set_dispatch(game::backend_dispatch);
     let calc = localinfo("tsstats_score", "addons/amxmodx/data/tsstats.amxx");
     if !calc.is_empty() {
         let path = amxx::core::build_pathname(&calc);
@@ -122,7 +124,9 @@ fn amxx_detach() {
         s.rank.clear();
         s.rank.set_calc(None);
     });
-    // Port addition: the server mustn't call into the library once it is unloaded.
+    // Port addition: the server mustn't call into the library once it is unloaded (its Pawn
+    // backends' trampolines, its listener).
+    crate::bots::detach_all(&RealGame::new());
     listener::unregister(game::api_table());
 }
 
@@ -143,7 +147,17 @@ fn plugins_loaded() {
             id.store(f.0, Ordering::Relaxed);
         }
     }
+    // Port addition: tsbot.inc's forwards.
+    game::register_ts_forwards();
     check_api();
+}
+
+/// Port addition: the core is about to drop its plugins and their forwards (`ServerDeactivate`).
+/// tsbot.inc's forward ids and the Pawn backends' bindings go; the backends stay registered with
+/// the server until the next map's plugin binds them again (`crate::bots`).
+fn plugins_unloading() {
+    game::forget_ts_forwards();
+    with(|s| s.bots.unbind_all());
 }
 
 /// Looks the server's plugin API up; logs once when it is missing (the module still works,
@@ -223,6 +237,41 @@ bind! {
     n_get_user_weapon => base::get_user_weapon,
     n_set_user_ammo => base::set_user_ammo,
     n_set_fuattack => base::set_fuattack,
+    n_ts_get_player_snapshot => world::get_player_snapshot,
+    n_ts_get_player_field => world::get_player_field,
+    n_ts_get_player_flags => world::get_player_flags,
+    n_ts_get_player_team => world::get_player_team,
+    n_ts_get_player_health => world::get_player_health,
+    n_ts_get_player_stance => world::get_player_stance,
+    n_ts_get_player_weapon => world::get_player_weapon,
+    n_ts_get_player_powerup => world::get_player_powerup,
+    n_ts_get_player_timescale => world::get_player_timescale,
+    n_ts_get_player_combat => world::get_player_combat,
+    n_ts_get_inventory => world::get_inventory,
+    n_ts_get_inventory_ex => world::get_inventory_ex,
+    n_ts_get_items => world::get_items,
+    n_ts_get_objectives => world::get_objectives,
+    n_ts_get_objective_name => world::get_objective_name,
+    n_ts_get_gamestate => world::get_gamestate,
+    n_ts_get_frameinfo => world::get_frameinfo,
+    n_ts_entity_key => world::entity_key,
+    n_ts_get_entity_info => world::get_entity_info,
+    n_ts_master_triggered => world::master_triggered,
+    n_ts_projectile_owner => world::projectile_owner,
+    n_ts_bot_register_backend => bot::register_backend,
+    n_ts_bot_unregister_backend => bot::unregister_backend,
+    n_ts_bot_data_dir => bot::data_dir,
+    n_ts_bot_log => bot::log,
+    n_ts_bot_create => bot::create,
+    n_ts_bot_kick => bot::kick,
+    n_ts_bot_runcmd => bot::runcmd,
+    n_ts_bot_get_result => bot::get_result,
+    n_ts_bot_command => bot::command,
+    n_ts_bot_select_weapon => bot::select_weapon,
+    n_ts_bot_buy => bot::buy,
+    n_ts_bot_buy_item => bot::buy_item,
+    n_ts_bot_clear_loadout => bot::clear_loadout,
+    n_ts_drop_weapon => bot::drop_weapon,
     n_get_stats => stats::get_stats,
     n_get_statsnum => stats::get_statsnum,
     n_get_user_astats => stats::get_user_astats,
@@ -296,6 +345,43 @@ amxx::natives! {
         c"ts_setuserammo" => n_set_user_ammo,
         // Port addition: tsfun.inc's commented-out native for `Melee_Attack` (`crate::forwards`).
         c"ts_set_fuattack" => n_set_fuattack,
+        // Port addition: tsbot.inc, the world and bot natives a Pawn bot backend uses
+        // (`crate::natives::world`, `crate::natives::bot`).
+        c"ts_get_player_snapshot" => n_ts_get_player_snapshot,
+        c"ts_get_player_field" => n_ts_get_player_field,
+        c"ts_get_player_flags" => n_ts_get_player_flags,
+        c"ts_get_player_team" => n_ts_get_player_team,
+        c"ts_get_player_health" => n_ts_get_player_health,
+        c"ts_get_player_stance" => n_ts_get_player_stance,
+        c"ts_get_player_weapon" => n_ts_get_player_weapon,
+        c"ts_get_player_powerup" => n_ts_get_player_powerup,
+        c"ts_get_player_timescale" => n_ts_get_player_timescale,
+        c"ts_get_player_combat" => n_ts_get_player_combat,
+        c"ts_get_inventory" => n_ts_get_inventory,
+        c"ts_get_inventory_ex" => n_ts_get_inventory_ex,
+        c"ts_get_items" => n_ts_get_items,
+        c"ts_get_objectives" => n_ts_get_objectives,
+        c"ts_get_objective_name" => n_ts_get_objective_name,
+        c"ts_get_gamestate" => n_ts_get_gamestate,
+        c"ts_get_frameinfo" => n_ts_get_frameinfo,
+        c"ts_entity_key" => n_ts_entity_key,
+        c"ts_get_entity_info" => n_ts_get_entity_info,
+        c"ts_master_triggered" => n_ts_master_triggered,
+        c"ts_projectile_owner" => n_ts_projectile_owner,
+        c"ts_bot_register_backend" => n_ts_bot_register_backend,
+        c"ts_bot_unregister_backend" => n_ts_bot_unregister_backend,
+        c"ts_bot_data_dir" => n_ts_bot_data_dir,
+        c"ts_bot_log" => n_ts_bot_log,
+        c"ts_bot_create" => n_ts_bot_create,
+        c"ts_bot_kick" => n_ts_bot_kick,
+        c"ts_bot_runcmd" => n_ts_bot_runcmd,
+        c"ts_bot_get_result" => n_ts_bot_get_result,
+        c"ts_bot_command" => n_ts_bot_command,
+        c"ts_bot_select_weapon" => n_ts_bot_select_weapon,
+        c"ts_bot_buy" => n_ts_bot_buy,
+        c"ts_bot_buy_item" => n_ts_bot_buy_item,
+        c"ts_bot_clear_loadout" => n_ts_bot_clear_loadout,
+        c"ts_drop_weapon" => n_ts_drop_weapon,
     ];
 }
 
@@ -312,12 +398,36 @@ mod tests {
             .map(|n| unsafe { core::ffi::CStr::from_ptr(n.name) }.to_string_lossy().into())
             .collect();
         // 13 in stats_Natives and 39 in base_Natives (NRank.cpp, NBase.cpp), plus ts_setuserammo
-        // and ts_set_fuattack.
-        assert_eq!(names.len(), 54);
+        // and ts_set_fuattack, plus tsbot.inc's 21 world and 14 bot natives.
+        assert_eq!(names.len(), 54 + 21 + 14);
         let mut sorted = names.clone();
         sorted.sort();
         sorted.dedup();
         assert_eq!(sorted.len(), names.len());
         assert!(NATIVES.last().unwrap().name.is_null());
+    }
+
+    #[test]
+    fn tsbot_inc_declares_every_tsbot_native_and_forward() {
+        let inc = include_str!("../../../../include/tsbot.inc");
+        let declared = |kind: &str, name: &str| inc.lines().any(|l| l.starts_with(kind) && l.contains(&format!("{name}(")));
+        let names: Vec<String> = NATIVES
+            .iter()
+            .take_while(|n| !n.name.is_null())
+            // SAFETY: as above.
+            .map(|n| unsafe { core::ffi::CStr::from_ptr(n.name) }.to_string_lossy().into())
+            .collect();
+        let tsbot = &names[54..];
+        assert_eq!(tsbot.len(), 35);
+        for n in tsbot {
+            assert!(declared("native ", n), "tsbot.inc doesn't declare native {n}");
+        }
+        for f in super::game::TsForward::ALL {
+            let n = f.signature().0.to_string_lossy();
+            assert!(declared("forward ", &n), "tsbot.inc doesn't declare forward {n}");
+        }
+        for n in ["ts_bot_add", "ts_bot_activate", "ts_bot_deactivate", "ts_bot_adopt"] {
+            assert!(declared("forward ", n), "tsbot.inc doesn't declare forward {n}");
+        }
     }
 }

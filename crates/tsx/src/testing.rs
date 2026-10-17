@@ -4,7 +4,10 @@
 //! encoders (`shared::protocol`) into the module's message hooks the way the engine's
 //! `WRITE_*` calls would.
 
-use crate::game::{Event, Game, PlayerInfo, TsApi};
+use crate::game::{
+    BackendCall, BackendForwards, BotCmd, BotCmdResult, EntityInfo, Event, FrameInfo, Game, GameState, ItemInfo, ObjectiveInfo, PlayerInfo,
+    PlayerSnapshot, TsApi, TsEvent, WeaponEntry,
+};
 use crate::msgs::{Followup, Kind};
 use crate::state::State;
 use std::cell::{Cell, RefCell};
@@ -38,6 +41,26 @@ pub struct FakeApi {
     /// What setters return.
     pub result: Cell<i32>,
     pub knife_owner: Cell<i32>,
+    // tsbot.inc's world and bot functions.
+    pub snapshots: RefCell<HashMap<i32, PlayerSnapshot>>,
+    pub inventories: RefCell<HashMap<i32, Vec<WeaponEntry>>>,
+    pub items: RefCell<Vec<ItemInfo>>,
+    pub objectives: RefCell<Vec<ObjectiveInfo>>,
+    pub game_state: Cell<GameState>,
+    pub frame: Cell<FrameInfo>,
+    pub entities: RefCell<HashMap<i32, EntityInfo>>,
+    pub keys: RefCell<HashMap<(i32, String), String>>,
+    /// What `attach_backend` returns when not `OK` (0: a new id, 101 on).
+    pub attach_result: Cell<i32>,
+    /// `attach_backend` calls the slot's `activate` inside, as the server does for a backend
+    /// `ts_bot_backend` names.
+    pub activate_on_attach: Cell<bool>,
+    pub names: RefCell<HashMap<i32, String>>,
+    /// What `create_bot` and `run_cmd` give.
+    pub create_result: Cell<i32>,
+    pub run_result: Cell<i32>,
+    pub cmd_result: Cell<BotCmdResult>,
+    pub last_cmd: Cell<Option<(i32, BotCmd)>>,
 }
 
 impl FakeApi {
@@ -79,6 +102,93 @@ impl TsApi for FakeApi {
     fn projectile_owner(&self, _e: i32) -> Result<i32, i32> {
         Ok(self.knife_owner.get())
     }
+    fn snapshot(&self, p: i32) -> Option<PlayerSnapshot> {
+        self.snapshots.borrow().get(&p).copied().filter(|s| s.user_id != 0)
+    }
+    fn inventory(&self, p: i32) -> Result<Vec<WeaponEntry>, i32> {
+        self.inventories.borrow().get(&p).cloned().ok_or(ts_plugin_api::NOT_PLAYER)
+    }
+    fn items(&self) -> Vec<ItemInfo> {
+        self.items.borrow().clone()
+    }
+    fn objectives(&self, p: i32) -> Result<Vec<ObjectiveInfo>, i32> {
+        if p != 0 && !self.snapshots.borrow().contains_key(&p) {
+            return Err(ts_plugin_api::NOT_PLAYER);
+        }
+        Ok(self.objectives.borrow().clone())
+    }
+    fn game_state(&self) -> GameState {
+        self.game_state.get()
+    }
+    fn frame_info(&self) -> FrameInfo {
+        self.frame.get()
+    }
+    fn entity_info(&self, e: i32) -> Result<EntityInfo, i32> {
+        self.entities.borrow().get(&e).copied().ok_or(ts_plugin_api::NOT_PLAYER)
+    }
+    fn entity_key(&self, e: i32, key: &str) -> Result<String, i32> {
+        if !self.entities.borrow().contains_key(&e) {
+            return Err(ts_plugin_api::NOT_PLAYER);
+        }
+        self.keys.borrow().get(&(e, key.to_owned())).cloned().ok_or(ts_plugin_api::UNSUPPORTED)
+    }
+    fn master_triggered(&self, master: &str, activator: i32) -> bool {
+        self.calls.borrow_mut().push(format!("master_triggered {master} {activator}"));
+        master.is_empty() || master == "open"
+    }
+    fn attach_backend(&self, slot: usize, name: &str) -> Result<i32, i32> {
+        self.calls.borrow_mut().push(format!("attach_backend {slot} {name}"));
+        let r = self.attach_result.get();
+        if r != 0 {
+            return Err(r);
+        }
+        let id = 101 + self.names.borrow().len() as i32;
+        self.names.borrow_mut().insert(id, name.to_owned());
+        if self.activate_on_attach.get() {
+            // Inside register_bot_backend, as the server's takeover does.
+            crate::bots::backend_call(&FakeGame::new(), slot, BackendCall::Activate);
+        }
+        Ok(id)
+    }
+    fn detach(&self, plugin: i32) -> i32 {
+        self.call(format!("detach {plugin}")).map_or_else(|e| e, |()| 0)
+    }
+    fn data_dir(&self, plugin: i32) -> Result<String, i32> {
+        self.names.borrow().get(&plugin).map(|n| format!("ts/tsmod/{n}/")).ok_or(ts_plugin_api::INVALID)
+    }
+    fn api_log(&self, plugin: i32, level: i32, msg: &str) {
+        self.calls.borrow_mut().push(format!("log {plugin} {level} {msg}"));
+    }
+    fn create_bot(&self, plugin: i32, name: &[u8], model: &[u8], skill: f32) -> i32 {
+        self.calls.borrow_mut().push(format!("create_bot {plugin} {:?} {:?} {skill}", name, model));
+        self.create_result.get()
+    }
+    fn kick_bot(&self, p: i32) -> i32 {
+        self.call(format!("kick_bot {p}")).map_or_else(|e| e, |()| 0)
+    }
+    fn run_cmd(&self, p: i32, cmd: &BotCmd) -> Result<BotCmdResult, i32> {
+        self.last_cmd.set(Some((p, *cmd)));
+        let r = self.run_result.get();
+        if r == 0 { Ok(self.cmd_result.get()) } else { Err(r) }
+    }
+    fn bot_command(&self, p: i32, line: &[u8]) -> i32 {
+        self.call(format!("bot_command {p} {:?}", line)).map_or_else(|e| e, |()| 0)
+    }
+    fn select_weapon(&self, p: i32, w: i32) -> i32 {
+        self.call(format!("select_weapon {p} {w}")).map_or_else(|e| e, |()| 0)
+    }
+    fn buy(&self, p: i32, w: i32, att: i32, akimbo: i32, ammo: i32) -> i32 {
+        self.call(format!("buy {p} {w} {att} {akimbo} {ammo}")).map_or_else(|e| e, |()| 0)
+    }
+    fn buy_item(&self, p: i32, item: i32) -> i32 {
+        self.call(format!("buy_item {p} {item}")).map_or_else(|e| e, |()| 0)
+    }
+    fn clear_loadout(&self, p: i32) -> i32 {
+        self.call(format!("clear_loadout {p}")).map_or_else(|e| e, |()| 0)
+    }
+    fn drop_weapon(&self, p: i32, w: i32) -> i32 {
+        self.call(format!("drop_weapon {p} {w}")).map_or_else(|e| e, |()| 0)
+    }
 }
 
 /// A plugin's forward in [`FakeGame::fire`].
@@ -97,6 +207,12 @@ pub struct FakeGame {
     pub on_fire: RefCell<Option<OnFire>>,
     pub given: RefCell<Vec<(i32, i32, i32, i32)>>,
     pub commands: RefCell<Vec<(i32, String)>>,
+    /// tsbot.inc's forwards: the multi-plugin ones fired, the backend's (as text), what the
+    /// backend's return, and how many backend forward sets were dropped.
+    pub ts_fired: RefCell<Vec<TsEvent>>,
+    pub backend_fired: RefCell<Vec<String>>,
+    pub backend_result: Cell<i32>,
+    pub dropped: Cell<usize>,
 }
 
 impl FakeGame {
@@ -214,6 +330,31 @@ impl Game for FakeGame {
     }
     fn give_powerup(&self, p: i32, e: i32) {
         self.given.borrow_mut().push((p, e, -1, -1));
+    }
+    fn fire_ts(&self, event: &TsEvent) -> i32 {
+        self.ts_fired.borrow_mut().push(event.clone());
+        0
+    }
+    fn backend_forwards(&self, _amx: usize) -> BackendForwards {
+        BackendForwards { add: 1, activate: 2, deactivate: 3, adopt: 4 }
+    }
+    fn drop_backend_forwards(&self, _f: &BackendForwards) {
+        self.dropped.set(self.dropped.get() + 1);
+    }
+    fn fire_backend(&self, fwd: i32, call: &BackendCall) -> i32 {
+        if fwd < 0 {
+            return 0;
+        }
+        let text = match call {
+            BackendCall::Add { name, model, skill } => {
+                format!("add {} {} {skill}", String::from_utf8_lossy(name), String::from_utf8_lossy(model))
+            }
+            BackendCall::Activate => "activate".into(),
+            BackendCall::Deactivate => "deactivate".into(),
+            BackendCall::Adopt(p) => format!("adopt {p}"),
+        };
+        self.backend_fired.borrow_mut().push(text);
+        self.backend_result.get()
     }
     fn fire(&self, event: Event) -> i32 {
         self.fired.borrow_mut().push(event);

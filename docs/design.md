@@ -8,13 +8,18 @@ are tsx's; section 8 is hamsandwich.
 
 ```
 crates/amxx/    the AMX Mod X module SDK and metamod glue (all FFI): repr(C) ABI types, the
-                AMXX_* and Meta_* export macros, native tables, core functions, engine and
-                edict wrappers, the score-plugin loader, finding the game library's exports
+                AMXX_* and Meta_* export macros, native tables, core functions (typed
+                multi-plugin and single-plugin forwards up to 16 parameters, by-reference
+                arrays), metamod results (MRES_HANDLED/OVERRIDE/SUPERCEDE), engine and edict
+                wrappers (traces, contents, the PVS, entity searches, client info keys, the
+                entvars a bot reads), the score-plugin loader, finding the game library's
+                exports, and the plugin API (`tsapi`: safe wrappers, plugin identities, bot
+                backend trampolines); reusable by other repositories' modules
 crates/tsx/     the TSX module (cdylib + rlib): deny(unsafe_code) except `ffi`
 crates/tsfun/   the TSFun wrapper (cdylib): module info only
 crates/hamsandwich/  Ham Sandwich (cdylib + rlib): deny(unsafe_code) except `ffi` (section 8)
 xtask/          build, dist, lint, test, e2e
-e2e/            the end-to-end test plugin
+e2e/            the end-to-end test plugins
 ```
 
 `tsx` keeps its logic behind two traits so it can be tested without an engine:
@@ -318,6 +323,18 @@ Differences:
   checks only count the hook calls. Ham numbers are compatible: 1.8.2's 130 and 1.9's `Ham`
   enums are prefixes of 1.10's.
 
+* 2026-10-17, port v3.0.8 (`be0dceb`, API version 7), ReHLDS 3.15 + Metamod-R 1.3 + AMX Mod X
+  1.10, both roots (`cargo xtask e2e linux win`): tsx_e2e 25 checks on Linux and 24 under Wine
+  (`melee_attack` skipped there: no kung-fu move in that run), ham_e2e 24, the stats round trip,
+  and tsbot_e2e's 44 checks (section 9, [tsbot.md](tsbot.md) §6) on a server of its own: the
+  backend took over from native when registered after `ts_bot_backend tsbot_e2e` (no reload),
+  `ts_bot_activate` came at the next frame, `addbot` reached `ts_bot_add`, the bots respawned on
+  `respawn`, walked 397 / 358 units in 1.5 s (Linux / Wine), jumped and landed, switched weapons,
+  fired 19 / 18 AK47 rounds (`ts_weapon_fired`, `ts_sound`, `ts_ammo_changed`), bought a Glock
+  and kevlar while dead and had them after the respawn, and all 4005 / 3856 `ts_bot_runcmd`s
+  returned `TSBOT_OK`. 113 unit tests
+  on the host, 114 on i686.
+
 ## 8. Ham Sandwich
 
 Stock hamsandwich creates an entity of the class, finds its C++ vtable through the private data
@@ -418,3 +435,31 @@ halved and superceded damage, `Ham_Item_PreFrame` on `weapon_tsgun` (a player ow
 `m_pPlayer` back, `get_pdata_int` of its `m_iId` (16), a reserve written with `set_pdata_int`
 taken by the game and a written `m_iId` overwritten. It also covers TraceAttack's TraceResult,
 Keyvalue's KeyValueData, the ItemInfo natives and the 8-deep nesting limit (section 7).
+
+## 9. tsbot.inc: Pawn bot backends
+
+Port addition (no upstream counterpart), documented in full in [tsbot.md](tsbot.md): natives and
+forwards in tsx (`include/tsbot.inc`, library `tsx`) that let a Pawn plugin be the server's bot
+backend. The pieces:
+
+* `crate::bots`: the four backend slots. `ts_bot_register_backend(name)` attaches a server
+  plugin identity (`attach_plugin`) and registers slot *n*'s trampolines
+  (`amxx::tsapi::backend::table(n)`) under the name; the server's callbacks come back through the
+  dispatcher (`ffi::game::backend_dispatch`) to `bots::backend_call`, which runs the registering
+  plugin's single-plugin forwards (`ts_bot_add`, `ts_bot_activate`, `ts_bot_deactivate`,
+  `ts_bot_adopt`). AMX Mod X reloads plugins each map: `AMXX_PluginsUnloading` unbinds the slots
+  (`Bots::unbind_all`) and the next map's registration binds them again; what the server sent
+  meanwhile (or inside the registration: a takeover's `activate`) is delivered at the next
+  `ts_frame`. `AMXX_Detach` detaches every identity.
+* `natives::world`: the frame's snapshots, inventory, items, objectives, rules, frame and entity
+  info as cell arrays in the API's field order (`world::layout`, tested against the structs'
+  offsets and the include).
+* `natives::bot`: `ts_bot_create`, `ts_bot_runcmd` (and its kept result), `ts_bot_command`, the
+  loadout and weapon functions, the data directory and the log.
+* The game forwards (`ts_frame`, `ts_weapon_fired`, `ts_sound`, `ts_damage`, ...) are
+  multi-plugin forwards (`ffi::game::TsForward`, registered at `AMXX_PluginsLoaded` with typed
+  parameters, forgotten at `AMXX_PluginsUnloading`) fired from tsx's API listener
+  (`ffi/listener.rs`, owner `NO_PLUGIN`), which gained the version 6 callbacks.
+
+No state is held across a forward or an API call that can run plugin code (`create_bot`,
+`run_cmd`, `detach_plugin`, `register_bot_backend`).

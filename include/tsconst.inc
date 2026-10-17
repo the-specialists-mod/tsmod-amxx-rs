@@ -67,6 +67,9 @@
 #define STUNT_DIVE 3
 #define STUNT_GETUP 4
 #define STUNT_FLIP 5
+// tsmod-amxx-rs: TS 3.0 stunts 2.x lacked, as client_stunt reports them.
+#define STUNT_WALLJUMP 6
+#define STUNT_WALLCLIMB 7
 
 enum {
   TSW_GLOCK18 = 1,
