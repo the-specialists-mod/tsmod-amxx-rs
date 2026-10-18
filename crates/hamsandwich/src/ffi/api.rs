@@ -79,7 +79,7 @@ fn to_arg(t: Ty, v: &Val, keep: &mut Vec<CString>) -> HamArg {
         Val::Int(i) | Val::Ent(i) => a.i = *i,
         Val::Float(f) => a.f = *f,
         Val::Vector(x) => a.v = *x,
-        Val::Handle(h) => a.p = *h as usize as *const core::ffi::c_void,
+        Val::Handle(h) => a.p = amxx::core::handle_to_pointer(*h),
         Val::Str(s) => {
             let c = CString::new(s.replace('\0', "")).unwrap_or_default();
             a.p = c.as_ptr().cast();
@@ -94,12 +94,27 @@ fn to_arg(t: Ty, v: &Val, keep: &mut Vec<CString>) -> HamArg {
 fn from_arg(t: Ty, a: &HamArg) -> Val {
     match t {
         Ty::Void => Val::Void,
+        // An INT carrying a pointer (Keyvalue's KeyValueData*) holds its low 32 bits, which on
+        // 64-bit are no pointer: plugins get 0 instead, which fakemeta's get_kvd reads as its own
+        // KeyValueData rather than crashing. Its handles live in a table of its own that no other
+        // module reaches, so a 64-bit server can't give plugins a KeyValueData they can read.
+        Ty::Int if cfg!(target_pointer_width = "64") && !a.p.is_null() => {
+            static NOTED: std::sync::Once = std::sync::Once::new();
+            NOTED.call_once(|| {
+                amxx::core::log(
+                    "Ham_Keyvalue: a 64-bit server can't pass the KeyValueData to plugins (fakemeta's get_kvd/set_kvd take only \
+                     its own handles); hooks get 0 (logged once)",
+                )
+            });
+            Val::Int(0)
+        }
         Ty::Int | Ty::Bool | Ty::Short => Val::Int(a.i),
         Ty::Float | Ty::PFloat => Val::Float(a.f),
         Ty::Vector | Ty::PVector => Val::Vector(a.v),
         Ty::Cbase | Ty::Entvar | Ty::Edict => Val::Ent(a.i),
-        // Pointers are 32 bits in every AMX Mod X build: a cell holds them.
-        Ty::Trace | Ty::ItemInfo => Val::Handle(a.p as usize as amxx::Cell),
+        // The pointer on 32-bit; on 64-bit the core's handle for it, which fakemeta's
+        // get_tr2/set_tr2 take too.
+        Ty::Trace | Ty::ItemInfo => Val::Handle(amxx::core::pointer_to_handle(a.p)),
         Ty::Str if a.p.is_null() => Val::Str(String::new()),
         // SAFETY: the API passes a NUL-terminated string valid for the call.
         Ty::Str => Val::Str(unsafe { CStr::from_ptr(a.p.cast()) }.to_string_lossy().into_owned()),

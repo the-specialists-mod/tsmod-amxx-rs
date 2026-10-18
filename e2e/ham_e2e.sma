@@ -66,7 +66,9 @@ new g_ta_pre, g_ta_post, g_ta_mode; // mode 1: ExecuteHamB on g_target, 2: the g
 new g_ta_seen_group, g_ta_post_group;
 new g_ta_forced, g_ta_forced_ok, g_ta_forced_bad, g_ta_hit_self, g_ta_expect;
 // Ham_Keyvalue: the KeyValueData pointer (fakemeta get_kvd/set_kvd).
-new g_kv_ent, g_kv_pre, g_kv_post, g_kv_handled = -1, g_kv_supercede;
+new g_kv_ent, g_kv_pre, g_kv_post, g_kv_handled = -1, g_kv_supercede, g_kv_nokvd;
+// A 64-bit server: Ham_Keyvalue's hooks got no KeyValueData (t_keyvalue runs before t_pdata).
+new g_64bit;
 new g_kv_class[32], g_kv_key[32], g_kv_value[32];
 // The server's hook nesting limit (ham::MAX_DEPTH = 8): Ham_Use re-running itself.
 new g_nest_ent, g_nest_depth, g_nest_max, g_nest_pre, g_nest_post;
@@ -321,7 +323,11 @@ public fw_kv_pre(ent, kvd)
 {
 	if (ent != g_kv_ent) return HAM_IGNORED;
 	g_kv_pre++;
+	// 0 on a 64-bit server, which can't pass the KeyValueData (see kv_case).
+	g_kv_nokvd = kvd == 0;
+	if (g_kv_nokvd) g_64bit = 1;
 #if E2E_KVD_READABLE
+	if (g_kv_nokvd) return HAM_IGNORED;
 	get_kvd(kvd, KV_ClassName, g_kv_class, charsmax(g_kv_class));
 	get_kvd(kvd, KV_KeyName, g_kv_key, charsmax(g_kv_key));
 	get_kvd(kvd, KV_Value, g_kv_value, charsmax(g_kv_value));
@@ -339,7 +345,7 @@ public fw_kv_post(ent, kvd)
 	if (ent != g_kv_ent) return HAM_IGNORED;
 	g_kv_post++;
 #if E2E_KVD_READABLE
-	g_kv_handled = get_kvd(kvd, KV_fHandled);
+	if (kvd) g_kv_handled = get_kvd(kvd, KV_fHandled);
 #endif
 	return HAM_IGNORED;
 }
@@ -347,11 +353,16 @@ public fw_kv_post(ent, kvd)
 kv_case(const name[], const key[], const value[], handled)
 {
 	new d[192];
-	g_kv_pre = 0; g_kv_post = 0; g_kv_handled = -1;
+	g_kv_pre = 0; g_kv_post = 0; g_kv_handled = -1; g_kv_nokvd = 0;
 	g_kv_class[0] = g_kv_key[0] = g_kv_value[0] = 0;
 	DispatchKeyValue(g_kv_ent, key, value);
 	formatex(d, charsmax(d), "pre=%d post=%d class=%s key=%s value=%s fHandled=%d", g_kv_pre, g_kv_post, g_kv_class, g_kv_key, g_kv_value, g_kv_handled);
 #if E2E_KVD_READABLE
+	// A 64-bit server passes no KeyValueData (hamsandwich logs why): only the hook calls count.
+	if (g_kv_nokvd) {
+		check(name, g_kv_pre == 1 && g_kv_post == 1, d);
+		return;
+	}
 	check(name, g_kv_pre == 1 && g_kv_post == 1 && equal(g_kv_class, "trigger_relay") && equal(g_kv_key, key) && equal(g_kv_value, value)
 		&& g_kv_handled == handled, d);
 #else
@@ -475,17 +486,37 @@ public t_events()
 // The mirror: a living player's m_pActiveItem points to its weapon_tsgun, whose m_pPlayer points back and
 // whose m_iId is 16. (fakemeta's get_pdata_ent reads an edict_t*, so on a CBaseEntity* such as
 // m_pActiveItem it gives -2, as on stock HLDS: not checked.) A plugin's
-// write of a reserve is taken back by the game, a write of m_iId is overwritten.
+// write of a reserve is taken back by the game, a write of m_iId is overwritten. A 64-bit server
+// mirrors no pointers: there both read -1, and the gun is found by its owner.
 public t_pdata()
 {
 	new d[192], alive;
 	for (new i = 1; i <= get_maxplayers(); i++) {
 		if (!is_user_alive(i)) continue;
 		alive++;
+		if (g_64bit) {
+			new gun = find_ent_by_owner(-1, "weapon_tsgun", i);
+			if (gun <= 0) continue;
+			new active = get_pdata_cbase(i, m_pActiveItem), owner = get_pdata_cbase(gun, TSGUN_m_pPlayer, TSGUN_LINUX);
+			formatex(d, charsmax(d), "id=%d gun=%d m_pActiveItem=%d m_pPlayer=%d", i, gun, active, owner);
+			check("pdata_cbase_64bit_null", active == -1 && owner == -1, d);
+			g_pd_player = i; g_pd_gun = gun;
+			break;
+		}
 		new active = get_pdata_cbase(i, m_pActiveItem);
 		if (active > 0) { g_pd_player = i; g_pd_gun = active; break; }
 	}
 	if (!alive) { skip("pdata", "no living player"); return; }
+	if (g_64bit) {
+		if (!g_pd_gun) { skip("pdata", "no living player has a weapon_tsgun"); return; }
+		new iid = get_pdata_int(g_pd_gun, TSGUN_m_iId, TSGUN_LINUX);
+		formatex(d, charsmax(d), "gun=%d m_iId=%d", g_pd_gun, iid);
+		check("pdata_int_mirror", iid == 16, d);
+		set_pdata_int(g_pd_gun, TSGUN_reserve + PROBE_AMMO, 123, TSGUN_LINUX);
+		set_pdata_int(g_pd_gun, TSGUN_m_iId, 99, TSGUN_LINUX);
+		set_task(0.3, "t_pdata_check");
+		return;
+	}
 	if (!g_pd_gun) { check("pdata_cbase", 0, "m_pActiveItem is NULL for every living player"); return; }
 	new id = g_pd_player, gun = g_pd_gun, class[32];
 	entity_get_string(gun, EV_SZ_classname, class, charsmax(class));

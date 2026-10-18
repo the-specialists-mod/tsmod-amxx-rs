@@ -1,4 +1,5 @@
-# Builds the modules (tsx, tsfun, hamsandwich) for i686 Linux and Windows and publishes a GitHub
+# Builds the modules (tsx, tsfun, hamsandwich) for i686 and x86_64 Linux and Windows (x86_64 for
+# goldsrc-net's 64-bit AMX Mod X) and publishes a GitHub
 # release when a `v*` tag is pushed: tsmod-amxx-rs-<tag>-<platform>.zip, each holding
 # addons/amxmodx/modules/ (and scripting/include/tsxaddon.inc, tsconst.inc) to copy over a server's ts/addons/. A manual run (workflow_dispatch) builds the archives as a workflow
 # artifact without publishing a release.
@@ -34,7 +35,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-multilib mingw-w64 libclang-dev zip
           rustup toolchain install stable --profile minimal --component rustfmt,clippy \
-            --target i686-unknown-linux-gnu,i686-pc-windows-gnu
+            --target i686-unknown-linux-gnu,i686-pc-windows-gnu,x86_64-unknown-linux-gnu,x86_64-pc-windows-gnu
           rustup default stable
 
       - uses: Swatinem/rust-cache@v2
@@ -54,7 +55,7 @@ jobs:
           version="${GITHUB_REF_NAME}"
           [[ "$GITHUB_REF_TYPE" == tag ]] || version="${GITHUB_SHA::7}"
           cargo xtask dist
-          if objdump -p dist/windows-i686/addons/amxmodx/modules/*.dll | grep -iE 'DLL Name: (libgcc|libwinpthread|libstdc)'; then
+          if objdump -p dist/windows-*/addons/amxmodx/modules/*.dll | grep -iE 'DLL Name: (libgcc|libwinpthread|libstdc)'; then
             echo "a module links a MinGW runtime DLL" >&2
             exit 1
           fi

@@ -54,26 +54,28 @@ include/        tsxaddon.inc (ts_setuserammo is a tsx native), tsconst.inc (TS 3
 
 ## Build and test
 
-Requirements: Rust stable with `i686-unknown-linux-gnu` and `i686-pc-windows-gnu`, clang ≥ 18,
-32-bit glibc/libgcc, MinGW-w64, and `../xash3d-fwgs` (with `3rdparty/library_suffix`) or
+Requirements: Rust stable with `i686-unknown-linux-gnu`, `i686-pc-windows-gnu`,
+`x86_64-unknown-linux-gnu` and `x86_64-pc-windows-gnu`, clang ≥ 18, 32-bit glibc/libgcc, MinGW-w64, and `../xash3d-fwgs` (with `3rdparty/library_suffix`) or
 `FWGS_DIR`: `goldsrc-sys` (a git dependency on the port) generates its bindings from the FWGS
 headers. `.cargo/config.toml` sets `FWGS_DIR` to `../xash3d-fwgs` unless the environment has it;
 xtask instead looks for `xash3d-fwgs` next to the checkout or any ancestor, so `cargo xtask` also
 works from a worktree under `.claude/worktrees/` (plain `cargo` there needs `FWGS_DIR`).
 
 ```sh
-cargo xtask test                 # unit tests, host and i686 (i686 runs the ABI layout tests)
-cargo xtask build [--release]    # both targets; must build without warnings
-cargo xtask lint                 # cargo fmt --check, clippy --all-targets -D warnings, both targets
+cargo xtask test                 # unit tests on x86_64 and i686 (each runs its ABI layout tests)
+cargo xtask build [--release]    # all four targets; must build without warnings
+cargo xtask lint                 # cargo fmt --check, clippy --all-targets -D warnings, every target
 cargo xtask dist [--debug-info]  # dist/<platform>/addons/amxmodx/modules/ with AMXX's file names
                                  # (+ scripting/include/tsxaddon.inc, tsconst.inc, tsfun.inc); checks the DLLs import no
                                  # MinGW runtime and the metamod modules export GiveFnptrsToDll
-cargo xtask e2e [linux] [win]    # end-to-end, below (~1.5 min per root)
+cargo xtask e2e [linux] [win] [linux64]  # end-to-end, below (~1.5 min per root)
 ```
 
 `e2e` needs the AMX Mod X test roots from `../ref/amxx-testenv` (its README): `setup.sh`
 builds `~/games/amxx_rehlds_linux` / `amxx_rehlds_win` (ReHLDS + Metamod-R + AMX Mod X 1.10)
-from the port's `dist/`, so rerun it after a new port build (`cargo xtask --release dist` there).
+and `amxx_rehlds_linux64` (`setup.sh linux64`: goldsrc-net/buildchain's 64-bit ReHLDS, Metamod-R
+and AMX Mod X fork) from the port's `dist/`, so rerun it after a new port build
+(`cargo xtask --release dist` there).
 xtask installs the release modules (hamsandwich under the stock module's file name) and
 `e2e/*.sma` (compiled with that env's `amxxpc`, with `include/` first) into the root, starts a
 4-bot server on `ts_dojo` with the env's `run.sh`, waits for each plugin's `DONE` line in
@@ -111,6 +113,13 @@ change, compare `nm -D --defined-only` / `objdump -p`.
   events).
 
 ## Pitfalls
+
+- **64-bit servers run goldsrc-net's AMX Mod X fork** (cells stay 32 bits): never put a pointer in
+  a cell; plugins get `amxx::core::pointer_to_handle`'s handle (the core's table, shared with
+  its fakemeta). Pointer-sized `repr(C)` layouts have 64-bit tests in `amxx::ffi`. Static strings
+  can't be `MAKE_STRING`ed (`Engine::make_string` allocates there), and the fork's Metamod-R
+  crashes on a cvar registered from the heap (`Engine::register_cvar` uses static slots). The
+  server mirrors no pointers into private data on 64-bit (`get_pdata_cbase` reads -1).
 
 - **The bindings' `enginefuncs_t` is FWGS's**, longer than metamod's: never copy whole engine
   tables, write fields (`amxx::meta` does).

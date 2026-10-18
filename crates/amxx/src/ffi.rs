@@ -6,10 +6,12 @@
 //! Hand-written `repr(C)` definitions of the AMX Mod X module ABI and the metamod plugin ABI.
 //!
 //! Only what this workspace uses is declared; the layouts match the headers named above on the
-//! 32-bit targets AMX Mod X ships for (i686 Linux and Windows). Entries of a C table this crate
-//! never calls are declared as `*const c_void`, which has the size of a function pointer.
+//! 32-bit targets AMX Mod X ships for (i686 Linux and Windows) and on the 64-bit ones of
+//! goldsrc-net's AMX Mod X fork (x86_64 Linux and Windows), whose cells stay 32 bits. Entries of
+//! a C table this crate never calls are declared as `*const c_void`, which has the size of a
+//! function pointer.
 
-use core::ffi::{c_char, c_int, c_void};
+use core::ffi::{c_char, c_int, c_long, c_void};
 
 /// A Pawn cell (`cell` in amx.h): 32 bits in every AMX Mod X build.
 pub type Cell = i32;
@@ -57,7 +59,8 @@ pub struct ModuleInfo {
 
 /// `tagAMX` from amx.h. GCC builds pack it (`AMX_NO_ALIGN` + `PACKED`) and MSVC builds use
 /// `#pragma pack(1)`; on i686 every field is 4 bytes, so the packed and natural layouts agree.
-/// The module only allocates these for the score script and passes them back to the core.
+/// The module only allocates these for the score script and passes them back to the core, which
+/// clears and fills the whole struct: it must be at least the core's size.
 #[repr(C, packed)]
 pub struct Amx {
     pub base: *mut u8,
@@ -81,8 +84,14 @@ pub struct Amx {
     pub reset_hea: Cell,
     pub sysreq_d: Cell,
     pub reloc_size: c_int,
-    /// `long`, 4 bytes on both 32-bit ABIs.
-    pub code_size: i32,
+    /// `long`: 4 bytes except on 64-bit Linux.
+    pub code_size: c_long,
+    /// The 64-bit fork's table of native addresses, which no longer fit `AMX_FUNCSTUB`'s cells. It
+    /// declares these in every build, 32-bit too; stock cores' AMX ends before them, and the
+    /// extra bytes stay unused.
+    pub native_addr_table: *mut *mut c_void,
+    pub native_addr_count: c_int,
+    pub native_addr_capacity: c_int,
 }
 
 /// `AMX_NATIVE`: natives are plain cdecl on every platform (`AMX_NATIVE_CALL` is empty unless
@@ -136,6 +145,9 @@ pub type PfnLoadAmxScriptEx = unsafe extern "C" fn(
     debug: c_int,
 ) -> c_int;
 pub type PfnUnloadAmxScript = unsafe extern "C" fn(amx: *mut Amx, code: *mut *mut c_void) -> c_int;
+/// `PointerToHandle` / `HandleToPointer`: goldsrc-net's 64-bit fork (`AMXModulePtrHandle.h`).
+pub type PfnPointerToHandle = unsafe extern "C" fn(ptr: *mut c_void) -> Cell;
+pub type PfnHandleToPointer = unsafe extern "C" fn(handle: Cell) -> *mut c_void;
 
 // ---- metamod (meta_api.h, plinfo.h, mutil.h) ----
 
@@ -235,11 +247,35 @@ mod layout {
 
     #[test]
     fn sizes_match_the_c_headers() {
-        // amx.h: 4 pointers, 6 cells, flags, 2x4 user words, error, paramcount, 5 cells, 2 ints.
-        assert_eq!(size_of::<Amx>(), 112);
+        // amx.h: 4 pointers, 6 cells, flags, 2x4 user words, error, paramcount, 5 cells, 2 ints,
+        // and the fork's table pointer and 2 ints.
+        assert_eq!(size_of::<Amx>(), 124);
+        assert_eq!(core::mem::offset_of!(Amx, code_size), 108);
         assert_eq!(size_of::<ModuleInfo>(), 28);
         assert_eq!(size_of::<PluginInfo>(), 36);
         assert_eq!(size_of::<MetaFunctions>(), 32);
         assert_eq!(core::mem::offset_of!(MutilFuncs, get_game_info), 44);
+    }
+}
+
+#[cfg(all(test, target_pointer_width = "64"))]
+mod layout {
+    use super::*;
+
+    #[test]
+    fn sizes_match_the_c_headers() {
+        // The fork's amx.h, packed: 4 pointers, 6 cells, flags, 2x4 user pointers, error,
+        // paramcount, 5 cells, reloc_size, a long (8 bytes on Linux, 4 on Windows), the table
+        // pointer and 2 ints.
+        let long = size_of::<c_long>();
+        assert_eq!(core::mem::offset_of!(Amx, usertags), 60);
+        assert_eq!(core::mem::offset_of!(Amx, error), 124);
+        assert_eq!(core::mem::offset_of!(Amx, code_size), 156);
+        assert_eq!(size_of::<Amx>(), 156 + long + 16);
+        // Natural alignment: 3 pointers, an int padded to 8, 3 pointers.
+        assert_eq!(size_of::<ModuleInfo>(), 56);
+        assert_eq!(size_of::<PluginInfo>(), 64);
+        assert_eq!(size_of::<MetaFunctions>(), 64);
+        assert_eq!(core::mem::offset_of!(MutilFuncs, get_game_info), 88);
     }
 }

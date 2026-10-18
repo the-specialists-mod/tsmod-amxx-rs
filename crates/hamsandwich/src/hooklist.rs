@@ -7,7 +7,7 @@ use crate::hooks::{Entry, Ty::*};
 
 /// Every `Ham` function in enum order: the plugin name, its hook name and signature.
 #[rustfmt::skip]
-pub const HOOKS: [Entry; 481] = [
+pub static HOOKS: [Entry; 481] = [
     Entry::new("Ham_Spawn", "spawn", Void, &[]),
     Entry::new("Ham_Precache", "precache", Void, &[]),
     Entry::new("Ham_Keyvalue", "keyvalue", Void, &[Int]),

@@ -16,9 +16,9 @@ the weapon in hand.
 
 | Module | Library | File (Linux / Windows) | What |
 |---|---|---|---|
-| TSX | `tsx`, class `xstats` | `tsx_amxx_i386.so` / `tsx_amxx.dll` | All the TS natives, the stats natives, `client_damage` / `client_death`, tsfun.inc's `client_stunt` / `client_powerup` / `Melee_Attack`, the rank, and (port addition) `tsbot.inc`'s natives and forwards for a Pawn bot backend. A metamod plugin too. |
-| TSFun Wrapper | `tsfun` | `tsfun_amxx_i386.so` / `tsfun_amxx.dll` | Empty, as upstream: lets plugins with `#include <tsfun>` (`#pragma reqlib tsfun`) load. |
-| Ham Sandwich | `hamsandwich` | `hamsandwich_amxx_i386.so` / `hamsandwich_amxx.dll` | `RegisterHam`, `ExecuteHam` and the rest, over the server's entity hooks (plugin API version 5, including the gun's `Item_*` / `Weapon_*` functions on `weapon_tsgun`), and `get_pdata_cbase` over the server's private-data mirror. Replaces AMX Mod X's file of the same name. A metamod plugin too. |
+| TSX | `tsx`, class `xstats` | `tsx_amxx_i386.so` (64-bit: `tsx_amxx_amd64.so`) / `tsx_amxx.dll` | All the TS natives, the stats natives, `client_damage` / `client_death`, tsfun.inc's `client_stunt` / `client_powerup` / `Melee_Attack`, the rank, and (port addition) `tsbot.inc`'s natives and forwards for a Pawn bot backend. A metamod plugin too. |
+| TSFun Wrapper | `tsfun` | `tsfun_amxx_i386.so` (`tsfun_amxx_amd64.so`) / `tsfun_amxx.dll` | Empty, as upstream: lets plugins with `#include <tsfun>` (`#pragma reqlib tsfun`) load. |
+| Ham Sandwich | `hamsandwich` | `hamsandwich_amxx_i386.so` (`hamsandwich_amxx_amd64.so`) / `hamsandwich_amxx.dll` | `RegisterHam`, `ExecuteHam` and the rest, over the server's entity hooks (plugin API version 5, including the gun's `Item_*` / `Weapon_*` functions on `weapon_tsgun`), and `get_pdata_cbase` over the server's private-data mirror. Replaces AMX Mod X's file of the same name. A metamod plugin too. |
 
 ## Requirements
 
@@ -36,9 +36,12 @@ the weapon in hand.
   fakemeta can't read `Ham_Keyvalue`'s KeyValueData (stock 1.8.2 has the same limit).
 * Metamod: Metamod-R or metamod-p (interface 5:13). AMX Mod X loads tsx as a metamod plugin
   by itself; don't list it in metamod's `plugins.ini`.
-* A 32-bit server (AMX Mod X is 32-bit only): HLDS/ReHLDS on Linux or Windows. The end-to-end
-  tests pass on ReHLDS 3.15 with Metamod-R 1.3 or metamod-p 1.21p109, and on HLDS 25th
-  anniversary with metamod-p (`docs/design.md` §7).
+* A 32-bit server: HLDS/ReHLDS on Linux or Windows. The end-to-end tests pass on ReHLDS 3.15
+  with Metamod-R 1.3 or metamod-p 1.21p109, and on HLDS 25th anniversary with metamod-p
+  (`docs/design.md` §7).
+* Or a 64-bit one (see [64-bit servers](#64-bit-servers)): goldsrc-net's 64-bit ReHLDS, Metamod-R
+  and AMX Mod X ([buildchain](https://github.com/goldsrc-net/buildchain)'s drop-ins) with the
+  port's 64-bit library (`ts_amd64.so`, `mp_amd64.dll`).
 
 ## Installing
 
@@ -66,6 +69,32 @@ ID, 2 IP), `tsstats_rankbots` (1), `tsstats_pause` (1 stops stats). Localinfo `t
 Port addition: `tsx_legacy_weaponids` (0: TS 3.0's weapon ids; 1: upstream's, for plugins that
 hard-code kung fu as 36; see [Weapon ids](#weapon-ids)). Set it in `server.cfg` or `amxx.cfg`;
 tsx reads it at map start and when a player enters the game.
+
+## 64-bit servers
+
+Stock AMX Mod X is 32-bit only. goldsrc-net's fork builds it for x86_64 (and aarch64), keeping
+32-bit cells, and [buildchain](https://github.com/goldsrc-net/buildchain) ships it with a 64-bit
+ReHLDS and Metamod-R as server drop-ins. The `linux-x86_64` and `windows-x86_64` archives are for
+that: copy their `addons/` over `ts/addons/` as above (on Linux the modules end in `_amd64.so`,
+the fork's names; on Windows the names are the 32-bit ones). The 64-bit drop-in's own `tsx`,
+`tsfun` and `hamsandwich` are stock ones and don't work on the Rust server; these replace them.
+
+The end-to-end tests pass on buildchain v1.0.9's Linux drop-in (`docs/design.md` §7). The Windows
+x86_64 build is built and its imports checked, but hasn't run on a server. Differences on 64-bit:
+
+* **Pointer handles.** A cell can't hold a pointer, so hamsandwich passes `TraceResult` and
+  `ItemInfo` handles from the core's handle table (the fork's `PointerToHandle`), which its
+  fakemeta also uses: `get_tr2`/`set_tr2` on a `Ham_TraceAttack` handle work as on 32-bit.
+* **`Ham_Keyvalue`'s KeyValueData.** fakemeta's `get_kvd`/`set_kvd` take only handles from its own
+  table, which no other module can add to, so `Ham_Keyvalue` hooks get 0 for it (logged once):
+  `get_kvd` then reads fakemeta's own KeyValueData, not the hooked one. The fork's own
+  hamsandwich can't pass it either. Stock 1.8.2 has the same limit on 32-bit.
+* **`get_pdata_cbase` / `set_pdata_cbase`.** The 64-bit server mirrors no pointers into its private
+  data (they don't fit TS's 32-bit words), so reads give -1 (null) and writes do nothing (logged
+  once). The int members (`get_pdata_int`) are mirrored as on 32-bit.
+* tsx keeps its cvars in its own static data, not on the heap: the fork's 64-bit Metamod-R
+  crashes when a plugin registers a cvar it can't find in a library (`find_memloc` calls `dlopen`
+  on an uninitialised `Dl_info` when `dladdr` fails).
 
 ## Native compatibility
 
@@ -209,21 +238,22 @@ frame). Other offsets read zeros (or what a plugin wrote) and their writes do no
 
 ## Building
 
-Requirements: Rust stable (edition 2024) with the `i686-unknown-linux-gnu` and
-`i686-pc-windows-gnu` targets, clang 18 or newer (bindgen), 32-bit glibc/libgcc, MinGW-w64
-(`i686-w64-mingw32-*`), and an [xash3d-fwgs](https://github.com/FWGS/xash3d-fwgs) checkout next to
+Requirements: Rust stable (edition 2024) with the `i686-unknown-linux-gnu`,
+`i686-pc-windows-gnu`, `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-gnu` targets, clang 18 or
+newer (bindgen), 32-bit glibc/libgcc, MinGW-w64 (`i686-w64-mingw32-*`, `x86_64-w64-mingw32-*`),
+and an [xash3d-fwgs](https://github.com/FWGS/xash3d-fwgs) checkout next to
 this repository with its `3rdparty/library_suffix` submodule (or set `FWGS_DIR`): the engine
 bindings come from the port's `goldsrc-sys` crate, which generates them from the FWGS headers.
 
 ```sh
-cargo xtask build [--release]    # tsx, tsfun, hamsandwich for i686 Linux and Windows
+cargo xtask build [--release]    # tsx, tsfun, hamsandwich for i686 and x86_64, Linux and Windows
 cargo xtask dist                 # dist/<platform>/addons/amxmodx/{modules,scripting/include}/, stripped
-cargo xtask test                 # unit tests (host and i686)
-cargo xtask lint                 # rustfmt check, clippy -D warnings for both targets
-cargo xtask e2e [linux] [win]    # end-to-end on the amxx-testenv roots (see AGENTS.md)
+cargo xtask test                 # unit tests (x86_64 and i686)
+cargo xtask lint                 # rustfmt check, clippy -D warnings for every target
+cargo xtask e2e [linux] [win] [linux64]  # end-to-end on the amxx-testenv roots (see AGENTS.md)
 ```
 
-Pushing a `v*` tag builds both platforms and publishes `tsmod-amxx-rs-<tag>-<platform>.zip`
+Pushing a `v*` tag builds the four platforms and publishes `tsmod-amxx-rs-<tag>-<platform>.zip`
 (`.github/workflows/release.yml`).
 
 ## Documentation

@@ -259,13 +259,19 @@ Differences:
   them unavailable since 1.70), from the server's plugin API (section 3), and `ts_set_fuattack`
   is a native again. The repository ships a patched `include/tsfun.inc` for them. The stunt
   types 6 and 7 (wall jump, wall climb) are the port's.
+* 64-bit servers (goldsrc-net's AMX Mod X fork; stock is 32-bit only): pointer handles from the
+  core's table, `Ham_Keyvalue` hooks get 0 for the KeyValueData and `get/set_pdata_cbase` have no
+  pointers to read (section 8); `MAKE_STRING` of a static string allocates (`ALLOC_STRING`), as
+  its offset from `pStringBase` needn't fit 32 bits; tsx's cvars live in static slots, as the
+  fork's Metamod-R crashes on a heap cvar (`find_memloc`, `amxx::engine::register_cvar`); the
+  `AMX` struct has the fork's three trailing fields (unused padding on stock cores).
 * With the API, the death half of `TSHealth` uses the server's report of each scored kill
   (section 4) instead of predicting it, so a kill the server scores after the victim's
   `TSHealth` 0 is no longer a suicide (#15).
 
 ## 7. Testing
 
-* Unit tests (`cargo xtask test`, host and i686): the ABI layouts (i686 only), module info and
+* Unit tests (`cargo xtask test`, x86_64 and i686): the ABI layouts (each width's), module info and
   version checks, the weapon table, rank file round trips including the upstream-format
   fixture, message parsing through the port's encoders, the damage/death logic, and every
   native against `FakeArgs` and `FakeGame`; the tsfun forwards and `ts_set_fuattack`
@@ -334,6 +340,16 @@ Differences:
   and kevlar while dead and had them after the respawn, and all 4005 / 3856 `ts_bot_runcmd`s
   returned `TSBOT_OK`. 113 unit tests
   on the host, 114 on i686.
+* 2026-10-18, 64-bit: port v3.0.8-13 (`f387a19`, API version 7, `dist/linux-x86_64`) on
+  goldsrc-net/buildchain v1.0.9's Linux amd64 drop-in (64-bit ReHLDS, Metamod-R 1.3.0.196 and the
+  AMX Mod X 1.10.0.5634 fork), the `linux64` amxx-testenv root (`cargo xtask e2e linux64`):
+  tsx_e2e 24 checks (`melee_attack` skipped: no kung-fu move in that run), ham_e2e 24, the stats
+  round trip and tsbot_e2e's 44. On 64-bit ham_e2e's Keyvalue checks only count the hook calls
+  (no KeyValueData, section 8), and its pdata checks find the gun by owner and expect -1 from
+  `get_pdata_cbase` (no mirrored pointers); the int mirror and its writes pass as on 32-bit. The
+  32-bit roots pass unchanged (`linux win`). 114 unit tests on x86_64 and on i686. Before the
+  fixes for 64-bit (section 8 and `amxx`): the server crashed loading tsx (Metamod-R's
+  `find_memloc` on a heap cvar) and in fakemeta's `get_kvd` on `Ham_Keyvalue`'s truncated pointer.
 
 ## 8. Ham Sandwich
 
@@ -387,7 +403,7 @@ pointer arguments written back; Float/Vector results into the next by-reference 
 into a buffer and length, others returned. Errors from the server (BUSY: the entity is inside
 one of its own functions, or the hooks already nest `ham::MAX_DEPTH` = 8 deep) are native errors.
 
-**ItemInfo**: handles are `ItemInfo *`, as stock. The module accepts only those it created or
+**ItemInfo**: handles are `ItemInfo *`, as stock (on 64-bit the core's handles for them, below). The module accepts only those it created or
 that a call in progress passed, so a bad handle is a native error instead of a crash.
 
 **pdata natives**: `get_pdata_cbase(_safe)` and `set_pdata_cbase` keep stock's checks (the
@@ -406,6 +422,20 @@ and a no-op, with one log line. fakemeta's `get_pdata_int` / `set_pdata_int`
 are stock's and work on the same mirror (its `get_pdata_ent` reads an `edict_t*`, which no mirrored
 member is: -2 on `m_pActiveItem`, as on stock HLDS) (writes to the reserves and clips go back into the
 game).
+
+**On 64-bit servers** (goldsrc-net's AMX Mod X fork, whose cells stay 32 bits) a cell can't hold
+a pointer. TraceResult and ItemInfo handles are then the core's: `amxx::core::pointer_to_handle`
+/ `handle_to_pointer` call the fork's `PointerToHandle` / `HandleToPointer`, a table its fakemeta's
+`get_tr2`/`set_tr2` and its hamsandwich use too, so a `Ham_TraceAttack` handle works in fakemeta
+and a fakemeta `create_tr2` handle in `ExecuteHam` (a 64-bit core without the table gets the
+module's own, known to no other module; on 32-bit the handle is the pointer, as stock). The
+int argument of `Ham_Keyvalue`, which carries the `KeyValueData *`, can't: fakemeta's
+`get_kvd`/`set_kvd` resolve their handles in a table of fakemeta's own (`fm_handles.h`) that no
+other module reaches, and its truncated low 32 bits crashed `get_kvd`. Hooks get 0 (logged once),
+which `get_kvd` reads as fakemeta's own KeyValueData: the 1.8.2 limit of section 7, on 64-bit. The
+fork's own hamsandwich passes the truncated value (`Hook_Void_Int`). The pdata natives read -1
+and write nothing (logged once): the server mirrors no pointers on 64-bit (its `pdata.rs`, as they
+don't fit TS's 32-bit words).
 
 **Version 4's hooks** need nothing new in the dispatcher: the server reports the gun's
 `Item_*` / `Weapon_*` functions (and `Ham_TS_Weapon_AlternateAttack`) as supported for the

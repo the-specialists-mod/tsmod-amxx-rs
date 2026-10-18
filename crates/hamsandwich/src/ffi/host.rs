@@ -120,7 +120,7 @@ fn cstring(s: &str) -> CString {
 /// A server-owned ItemInfo of a call in progress (the natives checked the handle against the
 /// call stack first).
 fn server_item(h: Cell) -> *mut ItemInfo {
-    h as usize as *mut ItemInfo
+    amxx::core::handle_to_pointer(h).cast()
 }
 
 pub struct RealHost;
@@ -218,8 +218,8 @@ impl Host for RealHost {
             },
             strings: [None, None, None],
         });
-        // The handle is the struct's address, so it can also be passed to the server.
-        let h = &b.info as *const ItemInfo as usize as Cell;
+        // The handle stands for the struct's address, so it can also be passed to the server.
+        let h = amxx::core::pointer_to_handle((&b.info as *const ItemInfo).cast());
         ITEM_INFOS.with(|m| m.borrow_mut().insert(h, b));
         h
     }

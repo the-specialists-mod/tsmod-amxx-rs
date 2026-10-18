@@ -1,19 +1,19 @@
 //! Build, package and test tooling: `cargo xtask <command>`.
 //!
 //! ```text
-//! build [--release]          tsx, tsfun and hamsandwich for i686 Linux and Windows
+//! build [--release]          tsx, tsfun and hamsandwich for i686 and x86_64, Linux and Windows
 //! dist [--debug-info]        release build -> dist/<platform>/addons/amxmodx/{modules,scripting/include}/ (stripped
 //!                            unless --debug-info), with AMX Mod X's file names
-//! lint                       cargo fmt --check, clippy -D warnings on both targets
-//! test                       unit tests on the host and on i686 Linux (the ABI layout tests)
-//! e2e [linux] [win]          modules + e2e/*.sma (tsx, hamsandwich, tsbot) on the amxx-testenv roots, a bot match on
+//! lint                       cargo fmt --check, clippy -D warnings on every target
+//! test                       unit tests on x86_64 and i686 Linux (each runs its ABI layout tests)
+//! e2e [linux] [win] [linux64]  modules + e2e/*.sma (tsx, hamsandwich, tsbot) on the amxx-testenv roots, a bot match on
 //!                            ts_dojo, then the plugin's checks (default: linux)
 //! ```
 //!
 //! Environment: `FWGS_DIR` (FWGS headers, default: `xash3d-fwgs` next to the checkout or one of its
 //! ancestors, so git worktrees under `.claude/worktrees/` find it too; an `FWGS_DIR` without the headers is ignored),
 //! `AMXX_TESTENV` (default `~/dev/hl/ref/amxx-testenv`), `AMXX_SCRIPTING` (amxxpc's directory),
-//! `AMXX_LINUX_ROOT` / `AMXX_WIN_ROOT` (default `~/games/amxx_rehlds_{linux,win}`),
+//! `AMXX_LINUX_ROOT` / `AMXX_WIN_ROOT` / `AMXX_LINUX64_ROOT` (default `~/games/amxx_rehlds_{linux,win,linux64}`),
 //! `AMXX_TSSTATS_SMA` (upstream's score plugin source), `E2E_TIMEOUT` (seconds to wait for the plugin, default
 //! 150), `E2E_NO_STATS` (skip the stats round trip), `E2E_NO_TSBOT` (skip tsbot.inc's phase), `E2E_ONLY_TSBOT` (only it).
 
@@ -30,7 +30,9 @@ struct Target {
     strip: &'static str,
 }
 
-const TARGETS: [Target; 2] = [
+/// The 64-bit ones are for goldsrc-net's AMX Mod X fork (its Linux modules end in `_amd64.so`;
+/// on Windows the names stay the 32-bit build's).
+const TARGETS: [Target; 4] = [
     Target {
         triple: "i686-unknown-linux-gnu",
         platform: "linux-i686",
@@ -46,6 +48,22 @@ const TARGETS: [Target; 2] = [
         platform: "windows-i686",
         files: [("tsx.dll", "tsx_amxx.dll"), ("tsfun.dll", "tsfun_amxx.dll"), ("hamsandwich.dll", "hamsandwich_amxx.dll")],
         strip: "i686-w64-mingw32-strip",
+    },
+    Target {
+        triple: "x86_64-unknown-linux-gnu",
+        platform: "linux-x86_64",
+        files: [
+            ("libtsx.so", "tsx_amxx_amd64.so"),
+            ("libtsfun.so", "tsfun_amxx_amd64.so"),
+            ("libhamsandwich.so", "hamsandwich_amxx_amd64.so"),
+        ],
+        strip: "strip",
+    },
+    Target {
+        triple: "x86_64-pc-windows-gnu",
+        platform: "windows-x86_64",
+        files: [("tsx.dll", "tsx_amxx.dll"), ("tsfun.dll", "tsfun_amxx.dll"), ("hamsandwich.dll", "hamsandwich_amxx.dll")],
+        strip: "x86_64-w64-mingw32-strip",
     },
 ];
 
@@ -106,15 +124,16 @@ fn built(t: &Target, release: bool, cargo_name: &str) -> PathBuf {
 }
 
 /// The server loads these DLLs with only system DLLs around: no MinGW runtime imports.
-fn check_windows_dll(dll: &Path, metamod: bool) -> Result<(), String> {
-    let out = Command::new("i686-w64-mingw32-objdump").arg("-p").arg(dll).output().map_err(|e| format!("objdump: {e}"))?;
+fn check_windows_dll(t: &Target, dll: &Path, metamod: bool) -> Result<(), String> {
+    let objdump = t.strip.replace("strip", "objdump");
+    let out = Command::new(&objdump).arg("-p").arg(dll).output().map_err(|e| format!("{objdump}: {e}"))?;
     let text = String::from_utf8_lossy(&out.stdout).to_lowercase();
     for bad in ["libgcc", "libwinpthread", "libstdc"] {
         if text.lines().any(|l| l.contains("dll name:") && l.contains(bad)) {
             return Err(format!("{} imports a MinGW runtime DLL ({bad})", dll.display()));
         }
     }
-    // tsx is a metamod plugin too: metamod looks up the undecorated stdcall name.
+    // tsx is a metamod plugin too: metamod looks up the undecorated name (stdcall on win32).
     if metamod && (!text.contains("givefnptrstodll") || text.contains("givefnptrstodll@")) {
         return Err(format!("{} doesn't export an undecorated GiveFnptrsToDll", dll.display()));
     }
@@ -134,7 +153,7 @@ fn dist(debug_info: bool) -> Result<(), String> {
             }
             if t.platform.starts_with("windows") {
                 // tsx and hamsandwich are metamod plugins too.
-                check_windows_dll(&dest, !to.starts_with("tsfun"))?;
+                check_windows_dll(t, &dest, !to.starts_with("tsfun"))?;
             }
             eprintln!("  {}", dest.display());
         }
@@ -159,7 +178,7 @@ fn lint() -> Result<(), String> {
 }
 
 fn test() -> Result<(), String> {
-    run(cargo().args(["test", "--workspace"]))?;
+    run(cargo().args(["test", "--workspace", "--target", "x86_64-unknown-linux-gnu"]))?;
     run(cargo().args(["test", "--workspace", "--target", "i686-unknown-linux-gnu"]))
 }
 
@@ -192,7 +211,14 @@ fn roots(names: &[String]) -> Result<Vec<Root>, String> {
                 target: &TARGETS[1],
                 exe: "hlds.exe",
             }),
-            other => Err(format!("unknown e2e root {other} (linux|win)")),
+            "linux64" => Ok(Root {
+                os: "linux64",
+                dir: env_path("AMXX_LINUX64_ROOT", home().join("games/amxx_rehlds_linux64")),
+                port: 27317,
+                target: &TARGETS[2],
+                exe: "hlds_linux",
+            }),
+            other => Err(format!("unknown e2e root {other} (linux|win|linux64)")),
         })
         .collect()
 }
@@ -389,7 +415,7 @@ fn wait_for(file: &Path, timeout: Duration, cond: impl Fn(&str) -> bool) -> bool
 
 /// The engine console log (`-condebug`): `ts/` on Linux, the root on Windows (ReHLDS).
 fn qconsole(r: &Root) -> PathBuf {
-    if r.os == "linux" { r.dir.join("ts/qconsole.log") } else { r.dir.join("qconsole.log") }
+    if r.os.starts_with("linux") { r.dir.join("ts/qconsole.log") } else { r.dir.join("qconsole.log") }
 }
 
 fn file_len(p: &Path) -> usize {
@@ -739,7 +765,7 @@ fn main() -> ExitCode {
         Some("lint") => lint(),
         Some("test") => test(),
         Some("e2e") => e2e(&rest),
-        _ => Err("usage: cargo xtask build [--release] | dist [--debug-info] | lint | test | e2e [linux] [win]".into()),
+        _ => Err("usage: cargo xtask build [--release] | dist [--debug-info] | lint | test | e2e [linux] [win] [linux64]".into()),
     };
     match r {
         Ok(()) => ExitCode::SUCCESS,

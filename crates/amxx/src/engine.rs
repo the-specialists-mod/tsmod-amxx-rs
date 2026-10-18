@@ -10,7 +10,9 @@
 //! references, so a handle can be held across engine calls that re-enter the game.
 
 use crate::core::{c_string, cstr_lossy};
+use core::cell::UnsafeCell;
 use core::ffi::{CStr, c_char};
+use core::sync::atomic::{AtomicUsize, Ordering};
 use goldsrc_sys::{TraceResult, edict_t, enginefuncs_t, globalvars_t};
 use std::sync::OnceLock;
 
@@ -27,6 +29,20 @@ unsafe impl Send for Engine {}
 unsafe impl Sync for Engine {}
 
 static ENGINE: OnceLock<Engine> = OnceLock::new();
+
+/// How many cvars [`Engine::register_cvar`] can register (tsx registers 6).
+pub const CVAR_SLOTS: usize = 16;
+
+struct CvarSlots([UnsafeCell<goldsrc_sys::cvar_t>; CVAR_SLOTS]);
+
+// SAFETY: the slots are only touched on the server's main thread (see `Engine`).
+unsafe impl Sync for CvarSlots {}
+
+const EMPTY_CVAR: goldsrc_sys::cvar_t =
+    goldsrc_sys::cvar_t { name: core::ptr::null_mut(), string: core::ptr::null_mut(), flags: 0, value: 0.0, next: core::ptr::null_mut() };
+
+static CVARS: CvarSlots = CvarSlots([const { UnsafeCell::new(EMPTY_CVAR) }; CVAR_SLOTS]);
+static CVAR_USED: AtomicUsize = AtomicUsize::new(0);
 
 /// The engine, once metamod called `GiveFnptrsToDll`.
 pub fn engine() -> Option<&'static Engine> {
@@ -109,14 +125,19 @@ impl Engine {
         if s == 0 {
             return String::new();
         }
-        // SAFETY: string_t is an offset from pStringBase on 32-bit engines (the only ones AMX
-        // Mod X supports); the result is a NUL-terminated engine string.
+        // SAFETY: string_t is an offset from pStringBase on every engine, 64-bit ones too; the
+        // result is a NUL-terminated engine string.
         unsafe { cstr_lossy(self.globals().pStringBase.wrapping_offset(s as isize)) }
     }
 
     /// `MAKE_STRING(s)` for a string with static lifetime (offset from `pStringBase`, as in the
-    /// SDK; doesn't allocate, unlike `ALLOC_STRING`).
+    /// SDK; doesn't allocate, unlike `ALLOC_STRING`). On 64-bit engines this library's data can be
+    /// further from `pStringBase` than string_t's 32 bits reach, so there it is `ALLOC_STRING`: a
+    /// copy in the engine's string pool, which the engine keeps in reach, freed at map change.
     pub fn make_string(&self, s: &'static CStr) -> goldsrc_sys::string_t {
+        if cfg!(target_pointer_width = "64") {
+            return call!(self.pfnAllocString(s.as_ptr())).unwrap_or(0);
+        }
         (s.as_ptr() as isize).wrapping_sub(self.globals().pStringBase as isize) as goldsrc_sys::string_t
     }
 
@@ -156,16 +177,25 @@ impl Engine {
         call!(self.pfnCVarSetFloat(name.as_ptr(), value));
     }
 
-    /// `CVAR_REGISTER` of a new cvar, then `CVAR_GET_POINTER` (as tsx does): the engine keeps
-    /// the struct, so it is leaked.
+    /// `CVAR_REGISTER` of a new cvar, then `CVAR_GET_POINTER` (as tsx does). The engine keeps
+    /// the struct, which lives in this library's data like a C module's static `cvar_t`, not on
+    /// the heap: metamod asks `dladdr` which plugin owns it, and the 64-bit Metamod-R
+    /// (goldsrc-net) calls `dlopen` on garbage when `dladdr` finds no library there. `None` once
+    /// the [`CVAR_SLOTS`] are used up.
     pub fn register_cvar(&self, name: &'static CStr, value: &'static CStr, flags: u32) -> Option<Cvar> {
-        let c = Box::leak(Box::new(goldsrc_sys::cvar_t {
+        let i = CVAR_USED.fetch_add(1, Ordering::Relaxed);
+        if i >= CVAR_SLOTS {
+            return None;
+        }
+        // SAFETY: each slot is handed out once (the counter above) and then belongs to the engine.
+        let c = unsafe { &mut *CVARS.0[i].get() };
+        *c = goldsrc_sys::cvar_t {
             name: name.as_ptr() as *mut c_char,
             string: value.as_ptr() as *mut c_char,
             flags,
             value: value.to_str().ok().and_then(|v| v.parse().ok()).unwrap_or(0.0),
             next: core::ptr::null_mut(),
-        }));
+        };
         call!(self.pfnCVarRegister(c));
         let p = call!(self.pfnCVarGetPointer(name.as_ptr())).unwrap_or(core::ptr::null_mut());
         (!p.is_null()).then_some(Cvar(p))

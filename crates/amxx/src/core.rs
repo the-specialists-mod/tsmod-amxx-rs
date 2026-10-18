@@ -36,6 +36,8 @@ pub(crate) struct CoreFns {
     pub load_amx_script: PfnLoadAmxScript,
     pub load_amx_script_ex: Option<PfnLoadAmxScriptEx>,
     pub unload_amx_script: PfnUnloadAmxScript,
+    pub pointer_to_handle: Option<PfnPointerToHandle>,
+    pub handle_to_pointer: Option<PfnHandleToPointer>,
 }
 
 static CORE: OnceLock<CoreFns> = OnceLock::new();
@@ -65,6 +67,8 @@ pub(crate) unsafe fn request(req: ReqFnptr, logtag: &'static CStr) -> Result<(),
     }
     // SAFETY: as in `get!`; NULL maps to `None`.
     let load_ex = unsafe { req(c"LoadAmxScriptEx".as_ptr()) };
+    // SAFETY: as in `get!`; only goldsrc-net's fork has these (see `pointer_to_handle`).
+    let (to_handle, to_pointer) = unsafe { (req(c"PointerToHandle".as_ptr()), req(c"HandleToPointer".as_ptr())) };
     let fns = CoreFns {
         add_natives: get!(c"AddNatives", PfnAddNatives),
         build_pathname: get!(c"BuildPathname", PfnBuildPathname),
@@ -89,6 +93,12 @@ pub(crate) unsafe fn request(req: ReqFnptr, logtag: &'static CStr) -> Result<(),
         load_amx_script_ex: (!load_ex.is_null())
             .then(|| unsafe { core::mem::transmute::<*mut core::ffi::c_void, PfnLoadAmxScriptEx>(load_ex) }),
         unload_amx_script: get!(c"UnloadAmxScript", PfnUnloadAmxScript),
+        // SAFETY: as in `get!`.
+        pointer_to_handle: (!to_handle.is_null())
+            .then(|| unsafe { core::mem::transmute::<*mut core::ffi::c_void, PfnPointerToHandle>(to_handle) }),
+        // SAFETY: as in `get!`.
+        handle_to_pointer: (!to_pointer.is_null())
+            .then(|| unsafe { core::mem::transmute::<*mut core::ffi::c_void, PfnHandleToPointer>(to_pointer) }),
     };
     let _ = CORE.set(fns);
     let _ = LOGTAG.set(logtag);
@@ -140,6 +150,77 @@ pub fn build_pathname(path: &str) -> String {
 pub fn is_player_ingame(index: i32) -> bool {
     // SAFETY: a plain core function taking an int.
     core().is_some_and(|c| unsafe { (c.is_player_ingame)(index) } != 0)
+}
+
+/// `MF_PointerToHandle`: the cell a plugin holds for a native pointer (a `TraceResult *`, an
+/// `ItemInfo *`), 0 for NULL. Cells are 32 bits in every build, so on 64-bit servers goldsrc-net's
+/// AMX Mod X fork numbers the pointers in a table of its core's, which its fakemeta and
+/// hamsandwich share: a handle from one module works in the others. On 32-bit the handle is the
+/// pointer, as in stock AMX Mod X. A 64-bit core without the table gets this module's own, which
+/// no other module knows.
+pub fn pointer_to_handle(p: *const core::ffi::c_void) -> Cell {
+    if p.is_null() {
+        return 0;
+    }
+    if cfg!(target_pointer_width = "32") {
+        return p as usize as Cell;
+    }
+    match core().and_then(|c| c.pointer_to_handle) {
+        // SAFETY: the core's function takes any pointer and only stores it.
+        Some(f) => unsafe { f(p.cast_mut()) },
+        None => own_handles::to_handle(p),
+    }
+}
+
+/// `MF_HandleToPointer`: the pointer [`pointer_to_handle`] gave `h` for, NULL for 0 or a handle
+/// it never gave.
+pub fn handle_to_pointer(h: Cell) -> *mut core::ffi::c_void {
+    if h == 0 {
+        return core::ptr::null_mut();
+    }
+    if cfg!(target_pointer_width = "32") {
+        return h as usize as *mut core::ffi::c_void;
+    }
+    match core().and_then(|c| c.handle_to_pointer) {
+        // SAFETY: the core's function looks the cell up in its table.
+        Some(f) => unsafe { f(h) },
+        None => own_handles::to_pointer(h),
+    }
+}
+
+/// The handle table of [`pointer_to_handle`] for a core without one: 1-based, an entry per
+/// pointer for the module's lifetime, as the fork's.
+mod own_handles {
+    use super::Cell;
+    use core::ffi::c_void;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    #[derive(Default)]
+    struct Table {
+        pointers: Vec<usize>,
+        handles: HashMap<usize, Cell>,
+    }
+
+    thread_local! {
+        static TABLE: RefCell<Table> = RefCell::default();
+    }
+
+    pub(super) fn to_handle(p: *const c_void) -> Cell {
+        TABLE.with(|t| {
+            let mut t = t.borrow_mut();
+            let t = &mut *t;
+            *t.handles.entry(p as usize).or_insert_with(|| {
+                t.pointers.push(p as usize);
+                Cell::try_from(t.pointers.len()).unwrap_or(0)
+            })
+        })
+    }
+
+    pub(super) fn to_pointer(h: Cell) -> *mut c_void {
+        let i = usize::try_from(h).ok().and_then(|h| h.checked_sub(1));
+        TABLE.with(|t| i.and_then(|i| t.borrow().pointers.get(i).copied()).unwrap_or(0) as *mut c_void)
+    }
 }
 
 /// A forward handle from [`register_forward`] or [`register_forward_params`].

@@ -33,7 +33,7 @@ out = [
     "",
     "/// Every `Ham` function in enum order: the plugin name, its hook name and signature.",
     "#[rustfmt::skip]",
-    "pub const HOOKS: [Entry; %d] = [" % len(ents),
+    "pub static HOOKS: [Entry; %d] = [" % len(ents),
 ]
 for (removed, hook, sig), name in zip(ents, names):
     if removed:

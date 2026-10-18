@@ -322,7 +322,9 @@ fn pdata_natives_without_the_server_read_nothing() {
 }
 
 /// With the server's mirror (plugin API version 5): pointers come back as entities, writes land
-/// in the block, and the block's end and the server's link are guarded.
+/// in the block, and the block's end and the server's link are guarded. 32-bit only: a 64-bit
+/// server mirrors no pointers (the next test).
+#[cfg(target_pointer_width = "32")]
 #[test]
 fn pdata_cbase_reads_and_writes_the_mirror() {
     let h = FakeHost::new();
@@ -355,6 +357,24 @@ fn pdata_cbase_reads_and_writes_the_mirror() {
     assert_eq!(n::set_pdata_cbase(&h, &mut c), 0);
     assert_eq!(c.errors, ["Offset 2 would overwrite the server's link to entity 50"]);
     assert_eq!(h.pdata_word(50, 8, 0x1000), Some(0));
+}
+
+/// A 64-bit server's private data holds no pointers: reads are NULL and writes do nothing,
+/// noted once; the entity and offset checks still apply.
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn pdata_cbase_on_a_64_bit_server_reads_null() {
+    let h = FakeHost::new();
+    h.pdata.borrow_mut().insert(1, vec![0xff; 0x3000]);
+    h.pdata.borrow_mut().insert(50, vec![0; 0x1000]);
+    assert_eq!(call(&h, n::get_pdata_cbase, &[1, 639, 5, 5]), -1);
+    assert_eq!(call(&h, n::get_pdata_cbase_safe, &[1, 639, 5, 5]), -1);
+    assert_eq!(call(&h, n::set_pdata_cbase, &[50, 28, 1, 4, 4]), 1);
+    assert_eq!(h.pdata_word(50, 32 * 4, 0x1000), Some(0), "nothing written");
+    assert_eq!(h.logs.borrow().len(), 1, "logged once");
+    let mut a = FakeArgs::new(&[77, 100, 5, 5]);
+    assert_eq!(n::get_pdata_cbase(&h, &mut a), 0);
+    assert_eq!(a.errors, ["Invalid entity 77"]);
 }
 
 #[test]

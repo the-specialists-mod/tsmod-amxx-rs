@@ -711,6 +711,17 @@ fn pdata_note(host: &dyn Host) {
     });
 }
 
+/// Whether the server's private data holds pointers: the Rust server mirrors them into TS's 32-bit
+/// words on 32-bit builds only (its `pdata.rs`), so on a 64-bit server `get_pdata_cbase` has
+/// nothing to read and `set_pdata_cbase` nothing to write.
+const POINTERS: bool = cfg!(target_pointer_width = "32");
+
+fn no_pointers_note(host: &dyn Host) {
+    log_once(host, "pdata64", || {
+        "get/set_pdata_cbase: a 64-bit server's private data holds no pointers, so reads give -1 (null) and writes do nothing".into()
+    });
+}
+
 /// Bytes 8..16 of the Rust server's private data hold its link to the entity
 /// (`ts_plugin_api::PluginApi::private_size`).
 const SERVER_LINK: core::ops::Range<usize> = 8..16;
@@ -730,13 +741,17 @@ fn past_end(a: &mut dyn Args, ent: Cell, off: Cell, size: usize) {
 /// version 5: a player's `m_pActiveItem`, the `weapon_tsgun`'s `m_pPlayer`). Port changes: the
 /// read is bounded by the block's size (a native error past it, where stock read past the
 /// object), and a pointer to no entity is -1 (`_safe`: -2, as stock) where stock's would have
-/// followed it.
+/// followed it. On a 64-bit server, -1 (see [`POINTERS`]).
 fn get_cbase(host: &dyn Host, a: &mut dyn Args, safe: bool) -> Cell {
     let ent = a.cell(1);
     if !fm_check_entity(host, a, ent) {
         return 0;
     }
     let Some(off) = pdata_offset(a, 2, 3) else { return 0 };
+    if !POINTERS {
+        no_pointers_note(host);
+        return -1;
+    }
     let Some(size) = pdata_size(host, ent) else {
         pdata_note(host);
         return -1;
@@ -763,7 +778,7 @@ pub fn get_pdata_cbase_safe(host: &dyn Host, a: &mut dyn Args) -> Cell {
 /// object (NULL for -1) at `offset`, as stock. The server takes no pointer writes back (its
 /// mirror rewrites `m_pActiveItem` and `m_pPlayer`), so only what plugins read sees it. Port
 /// changes: bounded by the block's size, and the server's link (bytes 8..16) is refused, both
-/// native errors.
+/// native errors. On a 64-bit server it writes nothing and returns 1 (see [`POINTERS`]).
 pub fn set_pdata_cbase(host: &dyn Host, a: &mut dyn Args) -> Cell {
     let ent = a.cell(1);
     if !fm_check_entity(host, a, ent) {
@@ -775,6 +790,10 @@ pub fn set_pdata_cbase(host: &dyn Host, a: &mut dyn Args) -> Cell {
     }
     // The linux difference comes after the value here.
     let Some(off) = pdata_offset(a, 2, 4) else { return 0 };
+    if !POINTERS {
+        no_pointers_note(host);
+        return 1;
+    }
     let Some(size) = pdata_size(host, ent) else {
         pdata_note(host);
         return 1;
