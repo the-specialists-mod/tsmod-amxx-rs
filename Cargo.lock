@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "amxx"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "goldsrc-sys",
  "libc",
@@ -95,7 +95,7 @@ dependencies = [
 
 [[package]]
 name = "hamsandwich"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "amxx",
  "goldsrc-sys",
@@ -320,14 +320,14 @@ source = "git+https://github.com/the-specialists-mod/the-specialistsmod-rs?tag=v
 
 [[package]]
 name = "tsfun"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "amxx",
 ]
 
 [[package]]
 name = "tsx"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "amxx",
  "goldsrc-sys",
@@ -361,4 +361,4 @@ checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 
 [[package]]
 name = "xtask"
-version = "0.3.0"
+version = "0.4.0"
